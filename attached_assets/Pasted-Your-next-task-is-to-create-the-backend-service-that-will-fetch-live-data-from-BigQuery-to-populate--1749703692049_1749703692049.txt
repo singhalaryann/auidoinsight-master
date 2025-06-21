@@ -1,0 +1,51 @@
+Your next task is to create the backend service that will fetch live data from BigQuery to populate our business snapshot metrics.
+
+We will use an on-the-fly architecture. Data will be fetched and processed live when the API is called, using a structured system for date filters that you have defined.
+
+### High-Level Flow
+
+1.  A user requests `GET /api/business-snapshot`.
+2.  The API fetches the user's top tags (e.g., `['engagement', 'retention']`).
+3.  It retrieves the required metric definitions (which include the `source_query` and `queryParams`) and insight definitions from the database based on the tags.
+4.  For each metric, the API will call a `SnapshotProcessor` service.
+5.  The processor will prepare the SQL query. It will parse the `date_filter_clause` from the metric's `queryParams`, replacing placeholders like `TODAY` and `3M` with actual date values. It will then inject the completed clause into the main `source_query`.
+6.  The prepared query is sent to the `BigQuery` service for execution.
+7.  The processor transforms the raw BigQuery result into the final JSON payload required by the frontend.
+8.  The API combines all the processed metrics and the static insights into a single response.
+
+### Detailed Instructions
+
+1.  **Install the BigQuery Client Library:**
+    *   Add the `@google-cloud/bigquery` package to the project's dependencies.
+
+2.  **Create a BigQuery Service (`server/services/bigquery.ts`):**
+    *   This file's only job is to run a prepared query.
+    *   Create and export an async function: `executeBigQuery(query: string)`.
+    *   Configure it to use service account credentials from environment variables.
+
+3.  **Create a `SnapshotProcessor` Service (`server/services/snapshot_processor.ts`):**
+    *   This service will contain the core logic for processing a single metric.
+    *   Export an async function `processMetric(metric: SnapshotMetric): Promise<any>`.
+    *   Inside `processMetric`:
+        *   **A. Prepare Query:** Call a local helper function `prepareQuery(metric)`. This function is the most critical part. It must:
+            *   Get the `date_filter_clause` template string from `metric.queryParams`. (e.g., `"active_date BETWEEN 'TODAY' AND '3M'"`).
+            *   **Create a robust sub-helper function, `parseDatePlaceholder(placeholder: string)`, that can translate strings into SQL date logic.**
+                *   `'TODAY'` -> should become `CURRENT_DATE()`
+                *   It must handle relative dates like `'3M'` (3 months from now) or `'1W_AGO'` (1 week ago). The format is `(\d+)(D|W|M|Y)(_AGO)?`. This function should generate the correct `DATE_ADD` or `DATE_SUB` SQL syntax.
+            *   Use the `parseDatePlaceholder` function to replace all occurrences of these uppercase placeholders within the `date_filter_clause` string.
+            *   Inject the fully resolved date clause into the `metric.source_query` where `{{date_filter}}` is.
+            *   Handle any other non-date placeholders (e.g., `{{country}}`) in the query using the rest of `metric.queryParams`.
+        *   **B. Execute Query:** Call `executeBigQuery` with the prepared SQL.
+        *   **C. Transform Result:** Call a local helper function `transformResult(metric, bigQueryResult)` to format the raw data into the final JSON the frontend needs.
+        *   Return the final transformed JSON payload for that single metric.
+
+4.  **Update the API Endpoint in `server/routes.ts`:**
+    *   Modify the `GET /api/business-snapshot` endpoint.
+    *   After getting the user's top tags, call a storage function to get the raw metric and insight definitions.
+    *   Use `Promise.all` to call `processMetric(metric)` for each metric.
+    *   Combine the original metric definitions with their newly fetched data payload under a `liveData` key: `{ ...metric, liveData: processedPayload }`.
+    *   Assemble and return the final API response: `{ metrics: [...], insights: [...] }`.
+
+5.  **Update the Storage Layer at `server/storage.ts`:**
+    *   Ensure there is a function `getSnapshotDefinitionsByTags(tags: string[])` that simply fetches metric and insight definitions from the database based on tags.
+    *   The `updateMetricPayload` function is not needed and should be deleted if it exists.

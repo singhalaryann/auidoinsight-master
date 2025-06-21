@@ -1,0 +1,47 @@
+### Think of your game as a big arena 🕹️
+
+1. **What we’re measuring — *minutes played***
+   Imagine you’re timing how long each player sticks around in a match. More minutes = deeper engagement, just like a gamer who keeps queuing “one more round.”
+
+2. **Two squads to compare**
+
+   * **Squad A — Feature X users.** They unlocked a shiny new power-up (Feature X) and can use it in battle.
+   * **Squad B — Non-users.** Same game, no new power-up.
+
+3. **The starting assumption (the “null hypothesis”)**
+   We **pretend** nothing changes:
+
+   > “On average, Squad A and Squad B play the **same** number of minutes.”
+   > In math shorthand that’s `μ_feature = μ_no`.
+
+4. **Rolling the dice — *Mann-Whitney U test***
+   Picture lining every player up by play-time, shortest to longest, then mixing the two squads’ jerseys. If Feature X really matters, you’d expect lots of red jerseys (users) bunched near the high-minute end.
+   The Mann-Whitney U test is the referee that counts how mixed those jerseys are **without** assuming anything about normal bell-curves (handy when play-time is lopsided).
+
+5. **The scoreboard number — *p-value***
+
+   * It answers: *“If the power-up actually had **zero** effect, how crazy-rare is the minute gap we just saw?”*
+   * A **p-value below 0.05** (< 5 % chance) is the ref waving a red flag: “Whoa, this gap is too big to chalk up to luck—reject the ‘nothing changes’ idea.”
+
+6. **How big is the gap? — *Cliff’s delta (δ)***
+
+   * Pretend every Feature X player arm-wrestles every Non-user; δ is the share of bouts one side wins minus the share the other side wins.
+   * **δ = 0**: 50/50 tug-of-war ➜ the squads overlap completely.
+   * **δ ≈ ± 1**: one squad steamrolls the other every time.
+   * **|δ| ≥ 0.28** means a **“medium” edge**—about 64 % of those arm-wrestles go to the winner, noticeable but not a total stomp.
+
+---
+
+### Putting it all together
+
+* **If p < 0.05** **and** **|δ| ≥ 0.28**
+
+  > “Players with the power-up really do stay in-game longer—and the advantage is big enough to matter, not just a statistical blip.”
+* **If p ≥ 0.05**
+
+  > “The play-time difference could just be a lucky streak; we can’t claim Feature X keeps people around.”
+* **If p < 0.05 but δ is tiny (say 0.05)**
+
+  > “Sure, the ref saw a difference, but it’s so small most players won’t feel it.”
+
+In gamer terms: you’re checking whether your new power-up actually makes players binge more matches—and if the effect is strong enough to brag about in the patch notes.

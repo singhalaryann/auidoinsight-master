@@ -1,0 +1,87 @@
+`/analyse` is returning `index.html` because the HTTP request never reaches the Slack-command handler in your server.
+The request is hitting your **fallback “serve-the-SPA” route**, so Express (or the Replit static file proxy) just sends React’s `index.html`.
+
+Below are the four most common reasons that happens and the quick fixes for each one.
+
+| 🔍 Symptom                                                                                                                                                                                           | ⚙️ What’s really going on                                                                                  | 💡 How to fix                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **1. Route order** – `app.use('*', sendIndex)` comes **before** `app.post('/slack/commands', …)`                                                                                                     | Express matches the wildcard first and never reaches the Slack route.                                      | Move every Slack endpoint **above** your `app.use('*', …)` catch-all (or remove the catch-all in dev).                                                                                                       |
+| **2. Wrong path for Bolt** – You registered `/slack/commands` in the Slack manifest, but Bolt’s default endpoint is `/slack/events`.                                                                 | Bolt’s built-in `ExpressReceiver` only mounts `/slack/events` (plus `/slack/oauth/*`) unless you override. | Either: <br>• Change the Slack manifest to `/api/slack/events`, **or**<br>• Create an extra Express route that pipes to `receiver.app`:<br>`receiver.router.post('/slack/commands', receiver.middleware());` |
+| **3. Body parser mismatch** – Slack posts `application/x-www-form-urlencoded`; you only enabled `express.json()`. Your handler throws, Express error middleware falls back to `index.html`.          | The route exists but rejects the request, so the error is swallowed by the SPA fallback.                   | Add `app.use(express.urlencoded({ extended: true }))` **before** the Slack routes, or rely on Bolt which parses it for you.                                                                                  |
+| **4. Signature guard fails** – You added your own `verifySlack` middleware. When the sig check fails (e.g., you `curl` without `X-Slack-Signature`), the middleware `next()`s to the wildcard route. | Your local curl tests get the HTML, while real Slack calls get a 401.                                      | Log inside the middleware. During local testing either:<br>  • include valid Slack headers, **or**<br>  • skip the check behind `if (process.env.NODE_ENV !== 'production')`.                                |
+
+---
+
+### Quick checklist to confirm
+
+1. **Hit the route directly in the browser**
+   `https://audio-insight-dashboard-…/slack/commands` → should be “Cannot GET /slack/commands”, *not* HTML.
+   If you still get HTML, the wildcard route is shadowing it (case 1).
+
+2. **Add a one-liner test route above everything**
+
+```ts
+app.all('/debug', (req, res) => res.send('hit debug'));
+```
+
+* `/debug` returns *text* ⇒ routes are ordered correctly.
+* `/slack/commands` returns HTML ⇒ the path is wrong (case 2) or parser/sig error (case 3 / 4).
+
+3. **Turn on request logging**
+
+```ts
+app.use((req, _res, next) => { console.log(req.method, req.path); next(); });
+```
+
+Watch your Replit console while you fire `/analyse`.
+
+* If you never see `POST /slack/commands` the manifest is pointing elsewhere (case 2).
+* If you see it, then your handler exits early; add `console.log` inside that function.
+
+---
+
+### Minimal working Express snippet
+
+```ts
+import express from 'express';
+import { App, ExpressReceiver } from '@slack/bolt';
+
+const receiver = new ExpressReceiver({
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  endpoints: '/slack/events',          // leave this default
+});
+
+const bolt = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  receiver,
+});
+
+// Slash-command handler
+bolt.command('/analyse', async ({ ack, body, client }) => {
+  await ack();
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: buildQuestionModal(''),
+  });
+});
+
+const app = receiver.app;              // Bolt’s express instance
+app.use(express.urlencoded({ extended: true }));  // must parse form data
+
+// OPTIONAL: if you insist on /slack/commands
+app.post('/slack/commands', receiver.middleware());
+
+// ----- SPA fallback LAST -----
+app.use('*', (_req, res) => {
+  res.sendFile('/path/to/index.html');
+});
+
+app.listen(process.env.PORT || 3000, () =>
+  console.log('Server listening'),
+);
+```
+
+### TL;DR
+
+`/analyse` returns raw HTML because the request never makes it to your slash-command code—it falls through to your “serve React” catch-all.
+Re-order the routes **or** point Slack at the correct Bolt endpoint, add `express.urlencoded()` so the body parses, and the problem disappears.

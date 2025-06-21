@@ -1,0 +1,50 @@
+display_information:
+  name: Analytics Assistant
+  description: AI-powered analytics platform with interactive modals for comprehensive data insights
+  background_color: "#1a1a2e"
+  long_description: "Analytics Assistant provides an interactive Slack experience for analytics questions. Use /analyse to open a rich modal with guided question entry, quick-start options for common analytics queries, and intelligent clarification flows. The system processes questions through AI, classifies intent, and updates your dashboard with relevant insights. Features include: modal-based question wizard, preset analytics buttons, dynamic clarification system, and real-time dashboard integration."
+features:
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  bot_user:
+    display_name: Analytics Assistant
+    always_online: true
+  slash_commands:
+    - command: /analyse
+      url: https://workspace-aviral-chandra1.replit.app/slack/commands
+      description: Open interactive analytics question wizard
+      usage_hint: Opens a modal with text input and quick-start buttons
+      should_escape: false
+settings:
+  interactivity:
+    is_enabled: true
+    request_url: https://workspace-aviral-chandra1.replit.app/slack/interactions
+  event_subscriptions:
+    request_url: https://workspace-aviral-chandra1.replit.app/api/slack/events
+    bot_events:
+      - app_mention
+      - message.channels
+      - message.groups
+      - message.im
+      - message.mpim
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - channels:history
+      - channels:read
+      - chat:write
+      - chat:write.public
+      - commands
+      - groups:history
+      - groups:read
+      - im:history
+      - im:read
+      - im:write
+      - mpim:history
+      - mpim:read
+      - mpim:write
+      - users:read
+      - users:read.email

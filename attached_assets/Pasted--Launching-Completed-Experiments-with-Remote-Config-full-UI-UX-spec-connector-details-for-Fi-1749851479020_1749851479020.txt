@@ -1,0 +1,167 @@
+# Launching Completed Experiments with Remote Config
+
+*(full UI / UX spec + connector details for Firebase RC, LaunchDarkly, AWS AppConfig)*
+
+---
+
+## 0 High-Level Flow
+
+```
+Connect → Configure Registry → Complete Experiment → Launch via RC
+```
+
+1. **Connect** (one-time, in **Connect** tab)
+2. **RC Registry** (global list of game-controlled flags)
+3. **Completed Experiment Card** (shows winner)
+4. **Launch Wizard** (push winner → RC provider)
+
+---
+
+## 1 “Connect” Section (one-time setup)
+
+### 1.1  Landing Grid
+
+| Card                       | Contents                                 | CTA when *not* connected | CTA when connected      |
+| -------------------------- | ---------------------------------------- | ------------------------ | ----------------------- |
+| **Firebase Remote Config** | Google logo • status pill • project name | **Connect**              | **Manage · Disconnect** |
+| **LaunchDarkly**           | LD logo · status                         | **Connect**              | **Manage · Disconnect** |
+| **AWS AppConfig**          | AWS logo · status                        | **Connect**              | **Manage · Disconnect** |
+
+> Hover tooltip: “RC provider lets you roll out winning variants without a new build.”
+
+---
+
+### 1.2  Provider-specific “Connect” Modal
+
+| Provider          | Required fields                                                                         | Test button                    | Save             |
+| ----------------- | --------------------------------------------------------------------------------------- | ------------------------------ | ---------------- |
+| **Firebase RC**   | • *Service Account JSON* upload<br>• *Project ID*                                       | **Test** → green “✓ Connected” | stores encrypted |
+| **LaunchDarkly**  | • *Personal Access Token*<br>• *Project Key*<br>• *Environment* (prod/stage)            | **Test** fetches flags list    |                  |
+| **AWS AppConfig** | • *AWS Access Key* • *Secret*<br>• *Region*<br>• *Application ID*<br>• *Environment ID* | **Test** pulls latest config   |                  |
+
+*Success banner:* “Launch capabilities enabled · Added by Abhas on 14 Jun 2025”.
+
+---
+
+## 2 RC Registry (global table)
+
+> *Left-nav → Remote Config*
+
+| Column            | Description / UI widgets              |
+| ----------------- | ------------------------------------- |
+| **Feature Code**  | slug (editable)                       |
+| **RC Key Path**   | dot-notation (`loot.booster.variant`) |
+| **Type**          | `bool / string / int / json`          |
+| **Default Value** | inline pill (truncate long JSON)      |
+| **Last Updated**  | datetime                              |
+| **⋮**             | Edit • Delete • History               |
+
+Add / Edit modal validates uniqueness of **RC Key Path**.
+Soft-delete marks row red, prevents new launches but preserves history.
+
+---
+
+## 3 Completed Experiment Card — Launcher Surface
+
+### 3.1  Collapsed Row (list view)
+
+```
+┌────────────────────────┬─────────────────────┬──────────────┐
+│ Booster UX     Winner: B  (+5.3 pp)          │  Roll Out ▾  │
+└────────────────────────┴─────────────────────┴──────────────┘
+```
+
+*Roll-out button state*
+
+| Case                  | Primary button label  | Tooltip                                              |
+| --------------------- | --------------------- | ---------------------------------------------------- |
+| No provider connected | **Connect RC** (gray) | “Add RC provider in Connect tab to enable launches.” |
+| Provider(s) connected | **Roll Out ▾**        | opens “Provider picker” if >1                        |
+
+### 3.2  Provider Picker (only if ≥ 2)
+
+Popup menu: Firebase • LaunchDarkly • AWS AppConfig (shows ✔ current default).
+
+---
+
+## 4 Launch Wizard (modal, 4 steps)
+
+| Step                    | UI elements                                                                                                                                                                                                | Notes                                                                                                |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| **1 Select Feature**    | • Searchable dropdown fed by RC Registry.<br>• “+ New Feature” if missing → inline create (only Feature Code & Path).                                                                                      | Tag shows type & default.                                                                            |
+| **2 Configure Payload** | Widget varies by **Type**:<br>• **bool** toggle<br>• **string/int** text input<br>• **json** Monaco editor (height 180 px).<br>Prefill winner: `{ "variant":"variant_B" }`.                                | Validation hints under field.                                                                        |
+| **3 Roll-out Strategy** | • **Traffic slider** (10-25-50-100 %)<br>• Checkbox **“Auto-Ramp”** (drop-down cadence presets).<br>• Schedule (⏰ icon) optional date-time picker.<br>• Environment (for LaunchDarkly / AWS) radio: *Prod* | Power & delta preview shown in side panel (“With current lift, 80 % power reached at 50 % traffic”). |
+| **4 Review & Confirm**  | Summary card:<br>• Provider, Feature, Payload JSON diff<br>• Ramp plan<br>• Roll-back note “Previous RC version will be saved automatically.”                                                              | CTA **Ship Now** (brand blue).                                                                       |
+
+*Confirmation toast:* “🚀 RC version v20250614\_123 pushed · full rollout ETA 30 min”
+
+---
+
+## 5 After Launch
+
+| Card banner                                         | Buttons                                             |
+| --------------------------------------------------- | --------------------------------------------------- |
+| “Rolled out via Firebase RC v20250614\_123 • 100 %” | **Roll-back** • View in RC provider (external link) |
+
+Roll-back modal lists last 3 RC versions with version notes.
+
+---
+
+## 6 Edge-Case Behaviours
+
+| Scenario                                          | UI feedback                                                                         |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Registry feature deleted after experiment started | warning pill “Feature archived; cannot roll out.”                                   |
+| Provider credential expired                       | red toast on ship attempt → link to **Manage** in Connect.                          |
+| JSON validation error (LaunchDarkly schema)       | Step 2 shows red border + provider-specific error.                                  |
+| Experiment multi-metric winners                   | Step 1 shows pre-selected variant but banner “Choose primary metric before launch”. |
+
+---
+
+## 7 Micro-copy
+
+* “Traffic” slider label: “Audience exposure”.
+* Auto-Ramp tooltip: “Ramp 25 % every 30 min until 100 %”.
+* Ship confirm prompt: “Are you sure you want to push Variant B to 100 % of users via Firebase Remote Config?”
+* Roll-back confirm: “Restore RC version v20250613\_987?”
+* Disabled state: “Winner not significant yet — roll-out disabled.”
+
+---
+
+## 8 Visual Tokens
+
+| Token                | Value                                                     |
+| -------------------- | --------------------------------------------------------- |
+| Provider color strip | Firebase (#FFA000), LaunchDarkly (#5C6BC0), AWS (#FF9900) |
+| Traffic slider fill  | #3B82F6 (blue-500)                                        |
+| Disabled button      | bg gray-200, text gray-500                                |
+| Danger (roll-back)   | bg red-50, text red-600                                   |
+
+---
+
+## 9 Backend Endpoints
+
+| Endpoint                           | Purpose                                                |
+| ---------------------------------- | ------------------------------------------------------ |
+| `POST /connectors/:provider`       | store creds (encrypted) + test                         |
+| `GET  /connectors`                 | list status                                            |
+| `POST /rc-registry`                | add feature                                            |
+| `GET  /rc-registry`                | list / search                                          |
+| `POST /experiments/:id/rollout`    | send provider, featureCode, payload, gradual, schedule |
+| `POST /rc/rollback`                | restore version                                        |
+| `GET  /experiments/:id/launch-log` | render audit timeline                                  |
+
+Push worker handles provider-specific SDK (Firebase Admin, LaunchDarkly REST, AWS SDK) and logs version to `rc_versions` table.
+
+---
+
+### Deliverable Summary
+
+* **Connect Tab**: cards for Firebase, LaunchDarkly, AWS — connect / manage flows.
+* **Global RC Registry**: discoverable CRUD for flags & defaults.
+* **Completed Experiment Card**: context-aware **Roll Out** button.
+* **Launch Wizard**: 4 guided steps with validation, power hints, rollback safety.
+* Uniform post-launch banner + rollback control.
+* Provider-agnostic backend endpoints; provider modules swap in under `/services/rcManager`.
+
+This spec keeps configuration complexity isolated to **Connect**, while the **Experiment card** remains a clean, single-click launch surface for every completed test.

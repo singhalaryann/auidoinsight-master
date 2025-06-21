@@ -1,0 +1,73 @@
+Below is a **ready-to-paste specification** you can hand to your front-end team.
+It tells the UI exactly *what* to show, *in what order*, and *how* to style / collapse each part so a PM or executive sees the story first and the code only if they want it.
+
+---
+
+## 🄰 Card Skeleton (high-level)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ ① Header Row                                                    │
+│    • Headline insight + icon                                    │
+│    • Timestamp                                                  │
+│    • Status pill (Ready)                                        │
+│    • “×” button (cancel)                                        │
+├──────────────────────────────────────────────────────────────────┤
+│ ② Executive Summary Block                                       │
+│    • One-sentence headline                                      │
+│    • Key metric chips (lift %, p-value, Φ)                      │
+├──────────────────────────────────────────────────────────────────┤
+│ ③ Key Metrics Table                                             │
+├──────────────────────────────────────────────────────────────────┤
+│ ④ Simple Impact Chart (bar or column)                           │
+├──────────────────────────────────────────────────────────────────┤
+│ ⑤ Business Interpretation                                       │
+│    • Bulleted insights & action items                           │
+├──────────────────────────────────────────────────────────────────┤
+│ ⑥ Assumptions & Caveats (gray footnote)                         │
+├──────────────────────────────────────────────────────────────────┤
+│ ▼ Technical Appendix (collapsible)                              │
+│    ⑦ SQL Query   (code block + copy button)                     │
+│    ⑧ Query Result (JSON / table)                                │
+│    ⑨ Python Script (code block + copy)                          │
+│    ⑩ Python Output (plain text)                                 │
+│    ⑪ Full Statistical Walk-through (tables)                     │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🄱 Detailed Section Specs
+
+| #        | Section                                       | Content Rules                                                                                                                                                                                                                             | UI Rules                                                                                                     |
+| -------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **1**    | **Header Row**                                | **Insight title** (e.g., *“Rank gains drive next-day retention +16 pp”*) · timestamp (UTC) · status pill · **×**                                                                                                                          | Left-aligned title icon (📈). Pill colors: *Ready* = green, *Queued* = gray. “×” opens cancel-confirm modal. |
+| **2**    | **Executive Summary**                         | *One crisp sentence* (≤ 25 words) that answers the question. Underneath, show three chips:<br>• **Lift %** (+27 %)<br>• **p-value** (<1e-300)<br>• **Φ** (0.14)                                                                           | Chips: pill-shape, 12 px, bold number, muted label.                                                          |
+| **3**    | **Key Metrics Table**                         | 4 columns: Group · Retention % · Absolute ↑ (pp) · Relative ↑ %. Show both cohorts.                                                                                                                                                       | Condensed zebra table, align numbers right, bold the uplift row.                                             |
+| **4**    | **Impact Chart**                              | Single bar pair or small column chart visualising 59.7 % vs 75.8 %.                                                                                                                                                                       | Height 120 px; hide grid; auto-generate colors from theme.                                                   |
+| **5**    | **Business Interpretation**                   | 3-4 bullet points:<br>• Statistical significance<br>• Magnitude<br>• Causal warning<br>• Next Action                                                                                                                                      | Bullets max 15 words each; verbs first (“Highlight rank gains via push…”).                                   |
+| **6**    | **Assumptions & Caveats**                     | “2 × 2 χ² on 333 k player-days, Jan – Mar 2025; no seasonality controls.”                                                                                                                                                                 | Small, gray text, line-height 1.3, bottom-aligned.                                                           |
+| **7-11** | **Technical Appendix (collapsed by default)** | **7** SQL block (syntax highlight + *Copy* button).<br>**8** Result JSON (monospace).<br>**9** Python script (syntax highlight + copy).<br>**10** Python stdout.<br>**11** Interpretation tables (χ², expected vs observed, effect size). | Accordion arrow rotates; remember user toggle in localStorage.                                               |
+
+---
+
+## 🄲 Cancel Flow (× button)
+
+1. **Click ×** → modal:
+   *Title:* **“Cancel this analysis?”**
+   *Body:* “This will remove the card. You can always re-run the question later.”
+2. Buttons: **Cancel Analysis** (red) · **Keep** (gray).
+3. Emit `{ action: "cancel" }` on confirm.
+
+---
+
+## 🄳 Styling Quick-Refs
+
+* Font scale: 16 px base, 20 px headline, 12 px chips/footnotes.
+* Colors: use brand palette; chips background 10 % tint.
+* Code blocks: dark theme, 12 px, overflow-scroll.
+* All sections padded `16 px 20 px`; appendix inner padding `12 px`.
+
+---
+
+### With this format, an exec sees the “so-what” at a glance and still has every line of SQL & Python one click away.

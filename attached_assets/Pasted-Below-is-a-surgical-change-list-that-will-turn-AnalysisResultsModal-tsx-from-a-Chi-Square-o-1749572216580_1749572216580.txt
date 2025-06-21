@@ -1,0 +1,162 @@
+Below is a **surgical change-list** that will turn **AnalysisResultsModal.tsx** from a *Chi-Square-only* view into a **fully dynamic, test-agnostic renderer**.
+
+---
+
+## 1 Redesign the data contract
+
+### 1.1 Make every test self-describing
+
+Replace the single `statisticalAnalysis` blob with an **array** of tests—each test carries a `type` string and a flexible `params` object.
+
+```ts
+/* ↓ OLD */
+statisticalAnalysis: any;
+
+/* ↑ NEW */
+tests: Array<{
+  id: string;              // e.g. "chi_square", "t_test", "log_rank"
+  label: string;           // human-readable (shown in UI)
+  summary: string;         // one-liner (“p < 0.001, small effect”)
+  params: Record<string, string | number | Array<any>>; // key-value pairs
+  tables?: Array<{
+    title: string;         // “Expected vs Observed”
+    headers: string[];     // ["Group", "Observed", "Expected"]
+    rows: Array<Array<string | number>>;
+  }>;
+}>;
+```
+
+Update the top-level **`AnalysisResults`** interface accordingly (around lines 1-26).
+
+### 1.2 Adjust backend / serializer
+
+Where you construct the JSON (Python → TS), wrap each test like:
+
+```json
+{
+  "id": "chi_square",
+  "label": "Chi-Square Test",
+  "summary": "χ² = 6547.2, p < 1e-300, Φ = 0.14",
+  "params": {
+    "χ²": 6547.23,
+    "p_value": 0,
+    "df": 1
+  },
+  "tables": [
+    {
+      "title": "Expected vs Observed",
+      "headers": ["Group", "Observed", "Expected"],
+      "rows": [
+        ["Weekend Retained", 110361, 103284],
+        ...
+      ]
+    }
+  ]
+}
+```
+
+---
+
+## 2 Simplify `<AnalysisResultsModal>` rendering
+
+### 2.1 Loop through tests instead of hard-coding
+
+Delete the three hard-wired “Chi-Square Test” / “Expected vs Observed” / “Effect Size” panels (lines ≈ 120-160, 190-235) and replace with:
+
+```tsx
+{results.tests.map(test => (
+  <div key={test.id} className="bg-white p-3 rounded border space-y-2">
+    <h5 className="text-sm font-medium">{test.label}</h5>
+
+    {/* key–value params */}
+    <div className="text-sm grid grid-cols-2 gap-x-4 gap-y-1">
+      {Object.entries(test.params).map(([k, v]) => (
+        <React.Fragment key={k}>
+          <div className="text-gray-600">{k}</div>
+          <div>{formatNumber(v)}</div>
+        </React.Fragment>
+      ))}
+    </div>
+
+    {/* optional tables */}
+    {test.tables?.map((tbl, idx) => (
+      <div key={idx} className="pt-3">
+        <h6 className="text-xs font-semibold mb-1">{tbl.title}</h6>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {tbl.headers.map(h => <TableHead key={h}>{h}</TableHead>)}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {tbl.rows.map((row, rIdx) => (
+              <TableRow key={rIdx}>
+                {row.map((cell, cIdx) => (
+                  <TableCell key={cIdx}>{formatNumber(cell)}</TableCell>
+                ))}
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    ))}
+  </div>
+))}
+```
+
+### 2.2 Add a helper for numeral formatting
+
+```ts
+const formatNumber = (n: any) =>
+  typeof n === "number" ? n.toLocaleString() : n;
+```
+
+---
+
+## 3 Make the “Statistical Backing” dialog reusable
+
+* Title stays **Statistical Analysis**.
+* Body now renders the same loop above.
+* Remove any wording that assumes a specific test.
+
+(The dialog trigger/button code itself can stay identical.)
+
+---
+
+## 4 Update dependent callers
+
+* Wherever you used to access `results.statisticalAnalysis...`, swap to `results.tests.find(t => t.id === 'chi_square')` **or** iterate.
+* Ensure JSON coming from the backend populates `tests` instead of `statisticalAnalysis`.
+
+---
+
+## 5 (Option) add icon mapping for flair
+
+```tsx
+const testIcons: Record<string, React.ReactNode> = {
+  chi_square: <Calculator className="h-4 w-4 text-purple-600" />,
+  t_test: <Calculator className="h-4 w-4 text-red-600" />,
+  // …
+};
+...
+<div className="flex items-center space-x-2">
+  {testIcons[test.id] ?? <Calculator className="h-4 w-4 text-gray-500" />}
+  <h3 className="font-semibold">{test.label}</h3>
+</div>
+```
+
+---
+
+## 6 Delete dead props
+
+* Remove `statisticalAnalysis` from all TypeScript types.
+* Purge any `effectSize`, `liftPercent`, etc. **if** they belong to a specific test; instead, include them in that test’s `params`.
+
+---
+
+### Result
+
+* **Zero new UI work** when you add a Log-Rank, ANOVA, or Mann-Whitney—just push a new `test` object from the backend.
+* The modal remains visually identical for PMs/execs, but scales effortlessly for analysts.
+
+That’s all you need to future-proof the statistical-result rendering.

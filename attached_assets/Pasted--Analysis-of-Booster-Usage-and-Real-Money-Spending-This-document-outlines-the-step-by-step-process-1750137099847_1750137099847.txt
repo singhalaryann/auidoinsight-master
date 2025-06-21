@@ -1,0 +1,194 @@
+# Analysis of Booster Usage and Real-Money Spending
+
+This document outlines the step-by-step process used to answer the question: **"Do heavy booster users spend more real money?"**
+
+## 1. Defining the Question and Hypothesis
+
+The objective is to determine if a correlation exists between high daily booster usage and the amount of real money a player spends.
+
+*   **Heavy Users:** Players who use an average of ≥ 10 boosters per day.
+*   **Light Users:** Players who use an average of < 10 boosters per day.
+*   **Null Hypothesis (H0):** The median spending of heavy users is less than or equal to the median spending of light users.
+*   **Alternative Hypothesis (H1):** The median spending of heavy users is greater than that of light users.
+
+Given that spending data is often not normally distributed, the non-parametric **Mann-Whitney U test** was chosen for this analysis.
+
+## 2. Data Extraction and Preparation
+
+The data was prepared in a multi-step SQL query, first calculating the average daily booster usage for each player and then joining that with their total spending converted to a single currency (GBP).
+
+### Step 2.1: Calculating Average Daily Booster Usage
+
+This query calculates the average number of boosters used per day for each player in PvP games. The result was saved to `bp.avg_daily_bstr_use_by_player`.
+
+```sql
+WITH daily_booster_usage AS (
+  SELECT
+    user_id,
+    active_date,
+    SUM(
+      CASE
+        WHEN j.element.player_booster_activate IS NULL
+          OR j.element.player_booster_activate = ''
+        THEN 0
+        ELSE ARRAY_LENGTH(SPLIT(j.element.player_booster_activate, ':'))
+      END
+    ) AS daily_total_boosters
+  FROM `bp.data3m`
+  CROSS JOIN UNNEST(game_end_v2.list) AS j
+  WHERE
+    j.element.game_type = 'pvp'
+    AND j.element.boosters IS NOT NULL
+    AND j.element.boosters != ''
+    AND j.element.boosters != '[]'
+  GROUP BY user_id, active_date
+)
+
+SELECT
+  user_id,ks
+  AVG(daily_total_boosters) AS avg_daily_boosters_used,
+  STDDEV_POP(daily_total_boosters) AS stddev_daily_usage
+FROM daily_booster_usage
+GROUP BY user_id
+
+This is saved as avg_daily_bstr_use_by_player
+And it looks like
+
+user_id	avg_daily_boosters_used	stddev_daily_usage
+FU63PFWm2xMaOe98r3eoZzpXlXH3	6.666666666666667	5.2493385826745405
+
+```
+
+### Step 2.2: Aggregating Purchases and Combining Data
+
+This query calculates the total money spent per user in GBP and joins it with their average booster usage. The final, combined data was saved to `bp.player_bstr_use_spend`.
+
+```sql
+-- 1. Get one exchange rate per currency (latest by start_date)
+WITH latest_rates AS (
+  SELECT
+    *,
+    ROW_NUMBER() OVER (PARTITION BY currency_code ORDER BY start_date DESC) AS rn
+  FROM `bp.currency_exchange_rates`
+)
+, rates AS (
+  SELECT
+    currency_code,
+    currency_units_per_1_pound
+  FROM latest_rates
+  WHERE rn = 1
+)
+
+-- 2. Aggregate total money spent per user (in GBP)
+, player_purchases AS (
+  SELECT
+    user_id,
+    SUM(p.element.product_price / r.currency_units_per_1_pound) AS total_money_spent_gbp
+  FROM `bp.data3m`
+  CROSS JOIN UNNEST(server_purchase_success.list) AS p
+  INNER JOIN rates r
+    ON p.element.currency = r.currency_code
+  GROUP BY user_id
+)
+
+-- 3. Join with avg_daily_bstr_use_by_player
+SELECT
+  a.user_id,
+  a.avg_daily_boosters_used AS avg_booster_use_per_day,
+  COALESCE(pp.total_money_spent_gbp, 0) AS total_money_spent_gbp
+FROM `bp.avg_daily_bstr_use_by_player` a
+LEFT JOIN player_purchases pp
+  ON a.user_id = pp.user_id
+```
+
+A sample of the resulting table `player_bstr_use_spend` looks like this:
+
+| Row | user_id                    | avg_booster_use_per_day | total_money_spent_gbp |
+|-----|----------------------------|-------------------------|-----------------------|
+| 1   | CAPPByChAwa6LPJlV0rGQxP4W2w2 | 8.5                     | 5821.75723239428      |
+
+## 3. Statistical Analysis: Mann-Whitney U Test
+
+The following Python script was used to perform the Mann-Whitney U test on the prepared data.
+
+### Python Script (`questions/code/mann_whitney_u_test.py`)
+```python
+import os
+from google.cloud import bigquery
+from scipy.stats import mannwhitneyu
+
+# Set the path to your service account key file
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "bq-readonly-bp-key.json"
+
+# Initialize the BigQuery client
+client = bigquery.Client()
+
+# Define your query to get the spending data for heavy and light users
+# Heavy users: avg_booster_use_per_day >= 10
+# Light users: avg_booster_use_per_day < 10
+query = \"\"\"
+SELECT
+  total_money_spent_gbp,
+  CASE
+    WHEN avg_booster_use_per_day >= 10 THEN 'heavy'
+    ELSE 'light'
+  END AS user_group
+FROM
+  `bp.player_bstr_use_spend`
+\"\"\"
+
+# Run the query
+query_job = client.query(query)
+results = query_job.result()
+
+# Separate the data into two groups
+heavy_spenders = []
+light_spenders = []
+
+for row in results:
+  if row['user_group'] == 'heavy':
+    heavy_spenders.append(row['total_money_spent_gbp'])
+  elif row['user_group'] == 'light':
+    light_spenders.append(row['total_money_spent_gbp'])
+
+# Perform the Mann-Whitney U test.
+u_statistic, p_value = mannwhitneyu(
+    heavy_spenders,
+    light_spenders,
+    alternative='greater'
+)
+
+print("Mann-Whitney U test results:")
+print(f"U statistic: {u_statistic}")
+print(f"P-value: {p_value}")
+
+# Interpretation of the results
+alpha = 0.05
+if p_value < alpha:
+    print("The null hypothesis is rejected. There is a statistically significant difference in median spending.")
+    print("Heavy booster users tend to spend more than light booster users.")
+else:
+    print("The null hypothesis cannot be rejected. There is not enough evidence to say that heavy booster users spend more.")
+
+print(f"\\nHeavy users (>= 10 boosters/day): {len(heavy_spenders)} players")
+print(f"Light users (< 10 boosters/day): {len(light_spenders)} players")
+```
+
+## 4. Results and Conclusion
+
+The script produced the following output:
+```
+Mann-Whitney U test results:
+U statistic: 8011159231.0
+P-value: 6.448438146466152e-234
+The null hypothesis is rejected. There is a statistically significant difference in median spending.
+Heavy booster users tend to spend more than light booster users.
+
+Heavy users (>= 10 boosters/day): 27987 players
+Light users (< 10 boosters/day): 561826 players
+```
+
+*   **U statistic:** `8,011,159,231.0`
+*   **P-value:** `~6.45e-234` - This extremely small p-value indicates that the observed difference is highly statistically significant.
+
+**Conclusion:** We reject the null hypothesis. The data provides very strong evidence that players who use boosters heavily are associated with significantly higher real-money spending compared to those who use them lightly. 

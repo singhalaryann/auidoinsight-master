@@ -1,0 +1,123 @@
+/**
+ * tagger.ts
+ * -----------
+ * Multi-label analytics-intent tagger for a React / Node / Next.js front-end.
+ * Uses the official OpenAI SDK (`npm i openai`).
+ */
+
+import OpenAI from "openai";
+
+export type Tag =
+  | "Engagement"
+  | "Retention"
+  | "Churn"
+  | "Monetization"
+  | "Revenue"
+  | "Ads"
+  | "Store"
+  | "Booster Usage"
+  | "Acquisition"
+  | "Funnel"
+  | "Cohort"
+  | "Segmentation"
+  | "Conversion"
+  | "Performance"
+  | "Other";
+
+const ALLOWED: Tag[] = [
+  "Engagement",
+  "Retention",
+  "Churn",
+  "Monetization",
+  "Revenue",
+  "Ads",
+  "Store",
+  "Booster Usage",
+  "Acquisition",
+  "Funnel",
+  "Cohort",
+  "Segmentation",
+  "Conversion",
+  "Performance",
+  "Other"
+];
+
+/* ---------- System Prompt -------------------------------------------------- */
+
+const SYSTEM_PROMPT = `
+You are *Analytics-Intent Tagger*.
+
+Task
+Read ONE analytics question in natural language.
+Return 1–3 tags that capture the core topics of the question.
+
+Output format
+• Tags only, comma-separated, no extra text.
+• Example: Engagement, Booster Usage
+
+Approved tags (exact spelling, title-case):
+
+Engagement · Retention · Churn · Monetization · Revenue · Ads · Store
+· Booster Usage · Acquisition · Funnel · Cohort · Segmentation
+· Conversion · Performance · Other
+
+Guidelines
+1. Assign 1 tag if the intent is singular; up to 3 if clearly multi-topic.
+2. Order tags by relevance (strongest first).
+3. Do NOT invent new tags or add commentary.
+4. If none apply, output Other only.
+`;
+
+/* ---------- OpenAI client -------------------------------------------------- */
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY // set in .env  (never expose in client bundle)
+});
+
+/* ---------- Public helper -------------------------------------------------- */
+
+/**
+ * getTags("Are booster users heavy engagement drivers?")
+ *  -> ["Engagement","Booster Usage"]
+ */
+export async function getTags(question: string): Promise<Tag[]> {
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0,
+    max_tokens: 10,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: question.trim() }
+    ]
+  });
+
+  const raw = (completion.choices[0].message.content || "").trim();
+
+  // Defensive parsing
+  const tags = raw
+    .split(/[,|\n]/)                // comma or newline separated
+    .map(t => t.trim())
+    .filter(t => t.length > 0)
+    .map(capitalize) as Tag[];
+
+  // Validate & de-dup
+  const valid = [...new Set(tags.filter(t => ALLOWED.includes(t)))];
+
+  return valid.slice(0, 3).length ? valid.slice(0, 3) : ["Other"];
+}
+
+/* ---------- Helper --------------------------------------------------------- */
+
+function capitalize(s: string) {
+  return s
+    .toLowerCase()
+    .replace(/\b\w/g, c => c.toUpperCase()) as Tag;
+}
+
+/* ---------- Example call --------------------------------------------------- */
+
+// (Uncomment for a quick test in Node)
+// (async () => {
+//   console.log(await getTags("Did our ARPDAU drop after the ad test?"));
+//   // → ["Revenue","Ads"]
+// })();

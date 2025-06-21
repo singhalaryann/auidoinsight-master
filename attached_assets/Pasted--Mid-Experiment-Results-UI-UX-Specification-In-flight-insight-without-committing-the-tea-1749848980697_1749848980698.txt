@@ -1,0 +1,166 @@
+### Mid-Experiment Results — UI / UX Specification
+
+*(“In-flight” insight without committing the team to premature conclusions)*
+
+---
+
+## 1 Objectives
+
+| Goal                | Why it matters                                                          |
+| ------------------- | ----------------------------------------------------------------------- |
+| **Instant pulse**   | PM glances at running test → knows delta, significance, remaining time. |
+| **Early warnings**  | Surface harmful trends (↓ retention) before full duration ends.         |
+| **Safe controls**   | Allow *Pause*, *Ramp*, or *Stop-Early* with context (power, p-value).   |
+| **Stat discipline** | Make “results not final” unmissable; prevent p-hacking.                 |
+
+---
+
+## 2 Information Architecture
+
+```
+Experiment Portfolio
+  ├─ Collapsed Row   (quick pulse)
+  └─ Expanded Drawer (mid-run snapshot)
+          ↳  Detail Page (deep dive, charts, actions)
+```
+
+---
+
+## 3 Collapsed Row (List View)
+
+| Element          | Spec                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------- |
+| **Name**         | “New Booster UX”  – left-aligned, 16 px bold.                                                  |
+| **Status pill**  | `running` (green-100 bg, gray-800 text).                                                       |
+| **Progress bar** | 8 px horizontal under row: filled % = elapsed days / planned days; tooltip “3 / 7 days”.       |
+| **Delta chip**   | *Primary metric* delta: e.g. `+5.3 pp` in green if positive; gray if not sig; red if negative. |
+| **p-value**      | Light-gray `p 0.23`; stays gray until < 0.05 then green; tooltip “2-tailed test”.              |
+| **Power**        | `86 %` in gray; turns green when ≥ 80 %. Tooltip “Chance of detecting true effect”.            |
+| **Actions**      | • **View Detail** (secondary button)  • **Pause** (ghost)  • **Cancel** (danger).              |
+
+Grid widths (desktop):
+
+\| 30 % Name | 10 % Pill | 15 % Delta | 15 % p-value / Power | 30 % Actions |
+
+Row height: 72 px. Hover highlight: `bg-gray-50`.
+
+---
+
+## 4 Expanded Drawer (One-click, no page navigation)
+
+### Layout
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│ Variants         Key Numbers            Status               │
+├───────────────────────────────────────────────────────────────┤
+│ Control    50 %  Δ +5.3 pp  p 0.23   Collecting data…        │
+│ Variant B  50 %  Power 86 %            ETA: 4 days           │
+│                                                             ⋮│
+└───────────────────────────────────────────────────────────────┘
+```
+
+*3-column responsive grid.*
+
+#### Components
+
+| Area                | Details                                                                                                                    |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Variants column** | Stacked list: *Control*, *Variant B*, traffic %.                                                                           |
+| **Key Numbers**     | For primary metric: absolute value, delta, p-value, power. Secondary metrics accessible via dropdown.                      |
+| **Status**          | Sentence: “Collecting data – need 14 k more samples (≈ 4 days).”  – based on live power calculator.                        |
+| **Micro-Charts**    | Tiny 48 px × 48 px sparklines for each metric; gray baseline line.                                                         |
+| **Banner**          | If harmful trend (≥ 5 % drop and p < 0.1) show red banner: “Potential negative impact on D7 retention – consider pausing.” |
+
+---
+
+## 5 Detail Page (Full Screen / Modal)
+
+### 5.1 Header
+
+```
+Winner TBD • +5.3 pp (not sig) • 3 / 7 days elapsed
+```
+
+Badges: **delta chip** | **p-value chip** | **power chip** | **time chip**.
+
+### 5.2 KPI Table
+
+| Metric       | Control | Variant B | Δ       | p    | Power |
+| ------------ | ------- | --------- | ------- | ---- | ----- |
+| Retention D1 | 42 %    | 47 %      | +5 pp   | 0.23 | 86 %  |
+| Avg Sessions | 3.4     | 3.7       | +0.3    | 0.15 | 62 %  |
+| ARPDAU       | \$0.37  | \$0.36    | –\$0.01 | 0.40 | 25 %  |
+
+Color rules: delta cell green ↑ or red ↓ when p < 0.05 else gray.
+
+### 5.3 Charts
+
+1. **Cumulative delta chart** – line of Δ vs day; shaded 95 % CI.
+2. **Power curve** – x = sample size, y = power; vertical line at current sample.
+3. **Traffic split** – simple doughnut (shows if uneven allocation or ramp-up plan).
+
+Charts can be toggled off for compact view.
+
+### 5.4 Actions
+
+| Button                           | Enabled when                     | Copy / Tooltip                              |
+| -------------------------------- | -------------------------------- | ------------------------------------------- |
+| **Ramp to 100 %**                | power ≥ 70 % & no negative delta | “Expose 100 % of users now.”                |
+| **Stop Early – Negative Impact** | delta negative & p < 0.05        | “Roll traffic back to Control immediately.” |
+| **Pause Test**                   | always                           | “Freeze variants; users see Control.”       |
+| **Duplicate**                    | always                           | “Clone settings for follow-up experiment.”  |
+
+Confirmation modals include sample size & p-value reminder.
+
+---
+
+## 6 Micro-copy
+
+* “Collecting data…” → gray text under Key Numbers.
+* “Not significant yet” → after p-value if > 0.05.
+* Tooltip for **Power**: “Likelihood the test will detect a true effect of this size.”
+* Warning banner copy:
+
+  > **Heads-up:** Variant B is trending –3 pp in D7 retention (p = 0.07). Consider pausing if you’re risk-averse.
+
+---
+
+## 7 Color & Typography Tokens
+
+| Token           | Value                  |
+| --------------- | ---------------------- |
+| `deltaPositive` | #0BA360 (green-600)    |
+| `deltaNegative` | #E02424 (red-600)      |
+| `deltaNeutral`  | #6B7280 (gray-500)     |
+| `bgBannerWarn`  | #FEE2E2 (red-50)       |
+| `fontMetric`    | 20 px / 28 px semibold |
+| `fontCaption`   | 12 px gray-500         |
+
+---
+
+## 8 Accessibility
+
+* All controls reachable via keyboard (`tab`, `space`, `enter`).
+* p-value & power chips include `aria-label="p-value 0.23"` etc.
+* Color + icon for deltas (▲▼) to aid color-blind users.
+
+---
+
+## 9 Backend Support Needed
+
+| Endpoint                                        | Returns                                                             |        |               |
+| ----------------------------------------------- | ------------------------------------------------------------------- | ------ | ------------- |
+| `GET /experiments/:id/summary`                  | { elapsedDays, plannedDays, winnerVariant, bannerWarning, actions } |        |               |
+| `GET /experiments/:id/kpis?metric=retention_d1` | KPI table values + cumulative series                                |        |               |
+| `GET /experiments/:id/power`                    | currentPower, samplesRemaining, etaDays                             |        |               |
+| `POST /experiments/:id/action`                  | { action: 'pause'                                                   | 'ramp' | 'stop', ... } |
+
+---
+
+### Outcome
+
+* **List row** gives a lightning-fast pulse.
+* **Drawer** offers mid-run reassurance or early warning without leaving context.
+* **Detail page** arms PMs with stats + safe control buttons.
+* All copy and visuals reinforce: *“Data in-flight—interpret with care.”*

@@ -1,0 +1,113 @@
+Below is a **structure-first redesign** that tightens the page into three clean bands— *Overview → Filter → Cards/Table*—so a PM’s eyes land on the right info in the right order.
+
+---
+
+## 1 Top “Experiment Pulse” Bar
+
+*(Quick scan of portfolio health)*
+
+| ▼KPI card spec                                            | Why change?                                         | Notes                                                                                                                                                                              |
+| --------------------------------------------------------- | --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| • Icon + Label (e.g. “Running”)<br> • Count in 28 px bold | Current six-tile row works, but order feels random. | Re-order left→right by lifecycle:<br>**Draft → Planning → Running → Paused → Completed → Cancelled**.<br>Fade tiles with 0 counts (20 % opacity) so the eye jumps to live numbers. |
+| • Clickable: filters table below                          | Today the tiles are static.                         | Turning each KPI card into a filter makes the status tabs redundant; frees vertical space.                                                                                         |
+
+> **Micro-copy tweak**
+> *Title:* “Experiments” → “Experiment Portfolio”
+> *Subtitle:* drop the sentence; it repeats the nav bar (“Design, run, analyze…”) and pushes content down.
+
+---
+
+## 2 Utility Strip
+
+*(Actions & secondary filters in one slim row)*
+
+| Element                                  | Placement                               | Rationale                                             |
+| ---------------------------------------- | --------------------------------------- | ----------------------------------------------------- |
+| **\[ + New Experiment ]** primary button | Far right, aligned with portfolio tiles | Keeps the CTA visible after scrolling (pin this row). |
+| Search ▸                                 | Far left                                | Enables “find by name” without new row.               |
+| Segment filter ▸ (team / owner)          | Next to search                          | Lets large teams drill down quickly.                  |
+
+---
+
+## 3 Experiment List
+
+Choose **Cards** if you expect <15 concurrent tests, **Table** if the list can grow large. Below shows a **hybrid**: compact rows with expandable drawer—reads like a table, feels like a card.
+
+### 3.1 Row Essentials (always visible)
+
+| Column          | Content                                                     | Visual treatment                                                                                           |
+| --------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Name**        | “Heavy booster usage ↓ churn”                               | Bold 16 px; status pill sits right side of cell (green `running`, gray `draft`, purple `completed`).       |
+| **Primary KPI** | retention\_rate                                             | 12 px gray under the name (“Metric: Retention \_rate”).                                                    |
+| **Duration**    | 7 days • 🌡️ progress bar (e.g. Day 3/7)                    | Thin blue bar under the row; progress expresses time pass at a glance.                                     |
+| **Started**     | 11 Jun 2025                                                 | Right-aligned tiny label.                                                                                  |
+| **Action**      | ▾ menu (Pause / Resume / View Results / Duplicate / Delete) | Removes exposed buttons that clutter the card; shows only primary CTA (`View Results`) when **completed**. |
+
+*Tip: use whole-row hover highlight + click to open detail; action menu prevents accidental pauses.*
+
+### 3.2 Expandable Drawer (on click or chevron)
+
+Inside the drawer:
+
+```
+ ┌────────────┬─────────────┐
+ │ Sparkline  │ Key numbers │
+ │  (metric)  │  • Δ +5%    │
+ │            │  • p 0.03   │
+ └────────────┴─────────────┘
+ Notes / warnings / next-step CTA
+```
+
+* **Sparkline** shows daily delta vs control—tiny but powerful.
+* **Key numbers** reuse the same green/red delta + sig checkmark language from the result card redesign.
+* **Info block**: if running, “Collecting data, power 68 % (needs 80 %)”; if paused, reason; if complete but not significant, short summary + *“Mark as Learned”* button.
+* **Buttons** inside drawer: *View Detail*, *Complete* (enabled when criteria met).
+
+---
+
+## 4 Visual & Hierarchy Tweaks
+
+1. **Kill duplicate tabs**
+   Once KPI cards filter the list, the blue status pill row (“All / Draft / …”) can go.
+2. **Spacing**
+   Reduce vertical padding between cards/rows (16 → 8 px) so more items fit above the fold.
+3. **Color hierarchy**
+
+   * Brand blue reserved for primary actions (New Experiment, View Results).
+   * Status pills: Green = running, Gray = draft/paused, Purple = completed.
+   * Progress bars: neutral gray background, blue fill.
+4. **Empty states**
+   If a filter returns zero rows show a friendly card: *“No running experiments. Kick off a new idea!”* with a ghost **+** button.
+
+---
+
+## 5 Low-Fidelity Wire (ASCII)
+
+```
+┌──────────────────────────────── Experiment Portfolio ──────────────────────────────┐
+│ Draft 0 | Planning 0 | Running 2 | Paused 0 | Completed 1 | Cancelled 0 |  + New  │
+│ Search ▻ [________]  Segment ▻ All owners                                          │
+├────────────────────────────────────────────────────────────────────────────────────┤
+│ ▸ Heavy booster usage ↓ churn                retention_rate      Day 3/7  11 Jun  │
+│   ████▊                                      Δ +4.2 pp   p 0.04                 ⋮  │
+├────────────────────────────────────────────────────────────────────────────────────┤
+│ ▾ BOOSTER                                    retention_rate      Running   11 Jun │
+│   ████▌                                      Δ +2.1 pp   ns                  ⋮    │
+│ ────────────────────────────────────────────────────────────────────────────────── │
+│   Sparkline     Key Numbers                               CTA: View Detail        │
+│   Notes: collecting data, power 60 %                                              │
+└────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+*(`▸` row collapsed, `▾` row expanded)*
+
+---
+
+### Why this hierarchy works
+
+1. **Portfolio bar first** → “How many tests & where are they?”
+2. **Utility strip** → “Start or find something.”
+3. **List rows** → “Which experiment needs my attention today?”
+4. **Drawer** → “Quick context without page-hop.”
+
+Each layer adds depth only when the PM asks for it—keeping the default view clean, scannable, and action-oriented.

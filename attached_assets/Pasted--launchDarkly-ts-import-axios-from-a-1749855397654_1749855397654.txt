@@ -1,0 +1,109 @@
+// launchDarkly.ts ------------------------------------------------------------
+import axios from "axios";
+
+/**  Launch an experiment winner via LaunchDarkly.
+ *
+ *  @param token         Server-side API token (role = Writer or custom)
+ *  @param projectKey    LD project key, e.g. "blockheads"
+ *  @param envKey        Environment key, e.g. "prod"
+ *  @param flagKey       Flag key, e.g. "features.booster.ux"
+ *  @param winnerKey     Variation *key* to roll out, e.g. "variantB"
+ *  @param traffic       0-1 decimal, 1 = 100 %
+ */
+export async function launchDarklyRollout(
+  token: string,
+  projectKey: string,
+  envKey: string,
+  flagKey: string,
+  winnerKey: string,
+  traffic = 1
+): Promise<{ ldVersion: number }> {
+  const ld = axios.create({
+    baseURL: "https://app.launchdarkly.com/api/v2",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "LD-API-Version": "beta" // newer instructions spec
+    },
+    timeout: 10_000
+  });
+
+  // ── 1. Get flag to resolve internal variationId ───────────────────────────
+  const { data: flag } = await ld.get<LDFlag>(
+    `/flags/${projectKey}/${encodeURIComponent(flagKey)}`
+  );
+
+  const winnerVar = flag.variations.find(v => v.key === winnerKey);
+  if (!winnerVar) {
+    throw new Error(
+      `Variation key "${winnerKey}" not found in flag "${flagKey}".`
+    );
+  }
+
+  // ── 2. Build instructions object ─────────────────────────────────────────
+  const instructions: LDInstruction[] = [{ kind: "turnFlagOn" }];
+
+  if (traffic >= 0.999) {
+    instructions.push({
+      kind: "updateFixedVariation",
+      variationId: winnerVar._id
+    });
+  } else {
+    const weights = Math.round(traffic * 100_000); // LD weight = 1-100 000
+    instructions.push({
+      kind: "addOrUpdateRule",
+      clauses: [],
+      variationOrRollout: {
+        rollout: {
+          kind: "rollout",
+          variations: [
+            { variation: winnerVar._id, weight: weights },
+            {
+              variation: flag.variations.find(v => v.key !== winnerKey)!._id,
+              weight: 100_000 - weights
+            }
+          ]
+        }
+      }
+    });
+  }
+
+  // ── 3. Patch flag ────────────────────────────────────────────────────────
+  const { data: patchResp } = await ld.patch<LDPatchResponse>(
+    `/flags/${projectKey}/${encodeURIComponent(flagKey)}`,
+    {
+      environmentKey: envKey,
+      instructions,
+      comment: `Rolled out "${winnerKey}" from experiment dashboard`
+    }
+  );
+
+  return { ldVersion: patchResp.version };
+}
+
+/* ── LaunchDarkly response types (minimal subset) ────────────────────── */
+
+interface LDFlag {
+  variations: { _id: string; key: string }[];
+}
+
+type LDInstruction =
+  | { kind: "turnFlagOn" }
+  | {
+      kind: "updateFixedVariation";
+      variationId: string;
+    }
+  | {
+      kind: "addOrUpdateRule";
+      clauses: unknown[];
+      variationOrRollout: {
+        rollout: {
+          kind: "rollout";
+          variations: { variation: string; weight: number }[];
+        };
+      };
+    };
+
+interface LDPatchResponse {
+  version: number; // new flag version number
+}

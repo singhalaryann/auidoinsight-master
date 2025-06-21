@@ -1,0 +1,233 @@
+Yes — Slack’s **interactive UI (Block Kit + modals)** can handle that entire wizard-style flow. Below is a practical blueprint you can drop into a Bolt-JS / TypeScript Slack app and adapt to your backend.
+
+---
+
+## 1.  Slack primitives that map to your flow
+
+| Your Step                | Slack Building-Block                                                                                                                                                                                                                                                                                                    | Notes                                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| **Trigger** (`/analyse`) | **Slash command**                                                                                                                                                                                                                                                                                                       | Could also expose a message-shortcut if you want the flow reachable from any message.                     |
+| **Question Input**       | **Modal (views.open)** containing:<br>• `plain_text_input` for free-form text<br>• **Quick-start buttons** (`button` elements) that write a default value into the input via `action_id`s → `view_update`<br>• Optional “Mic” button that just links to your web recorder (Slack doesn’t support native voice capture). |                                                                                                           |
+| **Clarification**        | **Second modal** shown with `views.push`                                                                                                                                                                                                                                                                                | Treat it as a step-2 wizard. Include `static_select`, `external_select`, `datepicker`, `checkboxes`, etc. |
+| **Async processing**     | • Ephemeral “Question submitted” message or toast<br>• **App Home tab** or DM updates driven by `views.publish` or `chat.postMessage`                                                                                                                                                                                   | Think of App Home as your Slack-side “Insights panel.”                                                    |
+| **Status updates**       | • Message updates (`chat.update`) <br>• Home-tab refresh                                                                                                                                                                                                                                                                | Your backend emits WebSocket updates; the Slack bot mirrors them in Home tab or thread.                   |
+| **Results modal**        | `views.open` with rich blocks (sections, charts as images)                                                                                                                                                                                                                                                              | Link out to your web dashboard if deeper drill-down is needed.                                            |
+
+---
+
+## 2.  High-level flow with Bolt-JS
+
+```ts
+// src/slackApp.ts
+import { App, subtype } from '@slack/bolt';
+import { analyzeQuestion, needsClarification } from './openai';
+
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  socketMode: true,
+  appToken: process.env.SLACK_APP_TOKEN,
+});
+
+/* 1️⃣ Slash command: /analyse */
+app.command('/analyse', async ({ ack, body, client }) => {
+  await ack();
+
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: buildQuestionInputModal(''),          // initial empty value
+  });
+});
+
+/* 2️⃣ Quick-start or free-text submitted */
+app.view('question_submit', async ({ ack, body, view, client }) => {
+  await ack();                                     // acknowledge modal
+
+  const question = view.state.values.q.block.input.value;
+
+  // Call OpenAI (or /api/analysis-setup)
+  const parsed = await analyzeQuestion(question);
+
+  if (needsClarification(parsed)) {
+    /* 2-B  push clarifying modal */
+    await client.views.push({
+      trigger_id: body.trigger_id,
+      view: buildClarifyModal(parsed.ambiguities),
+    });
+  } else {
+    /* 2-A  send to processing queue */
+    await postToQuestionsAPI(parsed);
+
+    // Confirmation toast
+    await client.chat.postEphemeral({
+      channel: body.user.id,
+      user: body.user.id,
+      text: '✅ Question submitted. I’ll ping you when the insight is ready.',
+    });
+  }
+});
+
+/* 3️⃣ Clarification modal submission */
+app.view('clarify_submit', async ({ ack, body, view }) => {
+  await ack();
+
+  const enhanced = collectClarifyAnswers(view);
+  await postToQuestionsAPI(enhanced);
+
+  /* Same confirmation as above… */
+});
+
+/* 4️⃣ Your backend → Slack updates */
+export async function pushStatusUpdate(userId: string, payload: InsightStatus) {
+  await app.client.chat.postMessage({
+    channel: userId,
+    thread_ts: payload.threadTs,      // keep updates threaded
+    text: formatStatusText(payload),
+  });
+}
+
+(async () => {
+  await app.start();
+  console.log('⚡️ Slack app is running!');
+})();
+```
+
+### Helper: build the first modal
+
+```ts
+function buildQuestionInputModal(prefill: string): ViewsOpenArguments['view'] {
+  return {
+    type: 'modal',
+    callback_id: 'question_submit',
+    title: { type: 'plain_text', text: 'Ask a Question' },
+    submit: { type: 'plain_text', text: 'Analyse' },
+    close:  { type: 'plain_text', text: 'Cancel' },
+    blocks: [
+      {
+        type: 'input',
+        block_id: 'q',
+        element: {
+          type: 'plain_text_input',
+          action_id: 'input',
+          placeholder: { type: 'plain_text', text: 'e.g. What’s our weekly retention rate?' },
+          initial_value: prefill,
+        },
+        label: { type: 'plain_text', text: 'Your question' },
+      },
+      {
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '🏃 Weekly retention' },
+            action_id: 'preset_weekly_retention',
+            value: 'What’s our weekly retention rate?',
+          },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '💰 ARPDAU last 30d' },
+            action_id: 'preset_arpdau',
+            value: 'What is ARPDAU for the last 30 days?',
+          },
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '🎙️ Voice' },
+            url: 'https://your-dashboard.com/voice',  // opens browser recorder
+            action_id: 'voice',
+          },
+        ],
+      },
+    ],
+  };
+}
+```
+
+The preset buttons send an **`block_actions`** event; inside the handler you call `views.update` to inject the selected text into the `plain_text_input` (or re-open the modal with `initial_value`).
+
+### Helper: build clarification modal
+
+```ts
+function buildClarifyModal(gaps: Ambiguity[]): View {
+  return {
+    type: 'modal',
+    callback_id: 'clarify_submit',
+    title: { type: 'plain_text', text: 'Need a bit more…' },
+    submit: { type: 'plain_text', text: 'Run analysis' },
+    blocks: [
+      // Example: metric select
+      {
+        type: 'input',
+        block_id: 'metric',
+        element: {
+          type: 'static_select',
+          action_id: 'metric_select',
+          placeholder: { type: 'plain_text', text: 'Choose a metric' },
+          options: [
+            { text: { type: 'plain_text', text: 'Retention' }, value: 'retention' },
+            { text: { type: 'plain_text', text: 'ARPDAU' }, value: 'arpdau' },
+            // …
+          ],
+        },
+        label: { type: 'plain_text', text: 'Which metric?' },
+      },
+      // Example: time period
+      {
+        type: 'input',
+        block_id: 'period',
+        element: {
+          type: 'datepicker',
+          action_id: 'period_select',
+          initial_date: gaps.suggestedStart ?? undefined,
+        },
+        label: { type: 'plain_text', text: 'Start date' },
+      },
+      // More inputs as needed…
+    ],
+  };
+}
+```
+
+---
+
+## 3.  Permissions & settings checklist
+
+1. **OAuth scopes**
+   `commands`, `chat:write`, `channels:read`, `groups:read`, `im:write`, `app_home:read`, `app_home:write`, `users:read`, `triggers:write` (if you later use Workflow Builder).
+
+2. **Interactivity & Shortcuts**
+
+   * Turn on *Interactivity* in your app settings.
+   * Provide your Bolt endpoint (e.g. `https://api.example.com/slack/events`).
+
+3. **Slash command** `/analyse` → same endpoint.
+
+4. **Socket Mode** (optional) if you don’t want to expose a public events URL.
+
+---
+
+## 4.  Where the WebDashboard fits
+
+* **Voice capture, heavy data viz** → keep that in the web dashboard; modal buttons or result messages can deep-link to it.
+* **Real-time status** → easiest in Slack by updating a thread or app-home view whenever your backend emits WebSocket events.
+
+---
+
+## 5.  Limitations & tips
+
+| Item                         | Work-around                                                              |
+| ---------------------------- | ------------------------------------------------------------------------ |
+| **Voice input**              | Slack apps can’t read mic; give a button that opens your own recorder.   |
+| **Long-running jobs**        | Always respond to `view_submission` within **3 s**; do heavy work async. |
+| **Modal depth**              | Max 3 stacked views; keep clarifications concise.                        |
+| **Rich charts inside Slack** | Render chart server-side → upload as image → show in modal block.        |
+
+---
+
+### TL;DR
+
+1. **Slash command** opens first modal → free-text or quick-start.
+2. Submit handler calls OpenAI; if ambiguous, **`views.push`** a second modal with dynamic input blocks.
+3. On final submit, enqueue analysis and **ack** with a friendly ephemeral message.
+4. Stream status/results back via thread updates or App Home refreshes.
+
+That’s fully achievable with Slack’s interactive UI today. Happy building! 🎉

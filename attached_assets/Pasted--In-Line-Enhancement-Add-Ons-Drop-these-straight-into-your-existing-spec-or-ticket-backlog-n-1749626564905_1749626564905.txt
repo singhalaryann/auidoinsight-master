@@ -1,0 +1,61 @@
+### In-Line Enhancement Add-Ons
+
+*(Drop these straight into your existing spec or ticket backlog — no cross-referencing needed.)*
+
+---
+
+#### 1. **Hypothesis Clarity Assist**
+
+| Item          | Detail                                                                                                                                                                                                     |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Trigger**   | Click **Next • Variants & Traffic** on Step 1 when hypothesis length < 30 chars *or* lacks verbs like *increase, decrease, lift*.                                                                          |
+| **API Call**  | `POST /ai/hypothesis-clarify` → `{ text }` → returns `{ questions[], confidence }`                                                                                                                         |
+| **UI**        | Modal overlay: **“Let’s sharpen your hypothesis”**<br>• Checkbox list of ≤ 3 AI-suggested questions<br>• Primary CTA **Use Suggestions** (inserts bullets into text area)<br>• Secondary **Keep Original** |
+| **Telemetry** | Log `accepted_suggestions` (true/false) & time-to-accept.                                                                                                                                                  |
+| **Copy**      | • Modal tagline: *“Clarity creates impact. Try these questions:”*<br>• Toast (on accept): *“Hypothesis refined ✓”*                                                                                         |
+
+---
+
+#### 2. **Cohort Picker v2**
+
+| Item            | Detail                                                                                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Component**   | Replace radio group with a single **searchable dropdown**: <br>– **All Users** (default) <br>– **Saved Cohorts** (type-ahead) <br>– **Create New Cohort…**    |
+| **Create Flow** | Selecting **Create New Cohort…** opens inline drawer: <br>1. Name field <br>2. CSV uploader (one `user_id` per line) <br>3. **Save Cohort** → `POST /cohorts` |
+| **Empty State** | If no saved cohorts: *“No cohorts yet — upload a CSV to create one.”*                                                                                         |
+| **Copy**        | Dropdown placeholder: **“Pick or create a cohort”**<br>CSV helper: *“Drag a CSV or click to browse.”*                                                         |
+| **Toast**       | *“Cohort ‘{name}’ added ✓”*                                                                                                                                   |
+
+---
+
+#### 3. **Sub-Cohort Exposure Slider**
+
+| Item           | Detail                                                                     |
+| -------------- | -------------------------------------------------------------------------- |
+| **Placement**  | Appears directly under selected cohort (Step 3).                           |
+| **UI**         | Horizontal slider 1 – 100 % (default = 100 %). Live % label right-aligned. |
+| **Data Model** | Write `cohort_exposure_pct` to experiment JSON.                            |
+| **Copy**       | Slider label: *“Show this test to {X %} of the cohort.”*                   |
+
+---
+
+#### 4. **Acceptance Checks**
+
+1. **Ambiguous hypothesis** triggers assist in ≤ 2 s; modal dismiss flows correctly.
+2. Cohort dropdown always lists saved cohorts (server `/cohorts` ping).
+3. Exposure slider value < 100 % limits variant rollout to that slice (integration test).
+4. All new elements keyboard-navigable; tooltips ARIA-labelled.
+
+---
+
+#### 5. **Risk Notes & Mitigations**
+
+| Risk                      | Mitigation                                                                       |
+| ------------------------- | -------------------------------------------------------------------------------- |
+| AI suggestions irrelevant | Prompt with game-analytics examples; temperature 0.5; user can skip.             |
+| Large CSV freezes UI      | Async upload with progress bar; 10 MB browser cap; presigned S3 link for larger. |
+| Slider misunderstood      | Snap to 1 % increments + live numeric label.                                     |
+
+---
+
+These three inline enhancements slot directly into Steps 1 and 3 of the wizard without altering later steps.

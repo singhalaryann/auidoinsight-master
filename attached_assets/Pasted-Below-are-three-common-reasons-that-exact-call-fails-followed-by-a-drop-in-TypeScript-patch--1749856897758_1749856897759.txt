@@ -1,0 +1,112 @@
+Below are **three common reasons that exact call fails**, followed by a **drop-in TypeScript patch** that fixes all of them and returns actionable error messages to the UI.
+
+---
+
+## 1 Why the request often 4 xx’s
+
+| Root cause                                                                                    | Symptom                                                    | Fix                                                                                                                                                                  |
+| --------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A. Wrong token scope** – you pasted an *environment* token or a *client-side* SDK key.      | `401` “invalid token” or `403` “insufficient permissions”. | Must be a **server-side access token** created in **Account → Authorization → + Token** with at least **`Writer`** role or a custom role that grants `project:read`. |
+| **B. No project filter** – `GET /projects` works only if the token can read **all projects**. | `403` “Access to resource forbidden”.                      | Call `GET /projects/{projectKey}` instead; token needs read access to *that* project only.                                                                           |
+| **C. Missing `X-LaunchDarkly-User-Agent` header** after May ’23 API changes.                  | LD returns `400 "Missing User Agent"` (rare).              | Add an identifying UA string (recommended).                                                                                                                          |
+
+---
+
+## 2 Patched connection handler
+
+```ts
+// server/routes.ts (extract)
+
+import axios from "axios";
+import type { Request, Response } from "express";
+
+export async function connectLaunchDarkly(req: Request, res: Response) {
+  const { projectId, environment = "production" } = req.body; // from client
+  const token = process.env.LAUNCHDARKLY_API_TOKEN?.trim();
+
+  if (!token) {
+    return res.status(500).json({
+      success: false,
+      error: "LaunchDarkly API token not configured in server environment"
+    });
+  }
+  if (!projectId) {
+    return res.status(400).json({
+      success: false,
+      error: "Missing projectId (LD project key) from client payload"
+    });
+  }
+
+  try {
+    const ld = axios.create({
+      baseURL: "https://app.launchdarkly.com/api/v2",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "LD-API-Version": "beta",
+        // helps LD support trace calls; not required but good practice
+        "X-LaunchDarkly-User-Agent": "BlockHeadsExperimentDashboard/1.0"
+      },
+      timeout: 10_000
+    });
+
+    // Narrower GET improves perf + works with tokens limited to one project
+    await ld.get(`/projects/${encodeURIComponent(projectId)}`);
+
+    // ◀ if we got here, creds + project key are valid
+    return res.json({
+      success: true,
+      providerId: "launchdarkly",
+      projectId,
+      environment,
+      message: "Successfully connected to LaunchDarkly"
+    });
+  } catch (err: unknown) {
+    const { response } = err as any;
+
+    let reason = "Unknown error";
+    if (response?.status === 401) reason = "Token invalid or expired";
+    else if (response?.status === 403)
+      reason = "Token lacks read access to this project";
+    else if (response?.status === 404)
+      reason = `Project key “${projectId}” not found`;
+    else if (err instanceof Error) reason = err.message;
+
+    return res.status(502).json({
+      success: false,
+      error: `LaunchDarkly connection failed: ${reason}`,
+      details: response?.data ?? null
+    });
+  }
+}
+```
+
+### What changed
+
+1. **Project-specific GET** → `/projects/{projectKey}` (avoids cross-project scope requirement).
+2. **User-Agent header** to satisfy LD best-practice.
+3. **Granular error mapping** so your red toast can say *exactly* what broke.
+4. Validates `projectId` from the client instead of default `'default'`.
+
+---
+
+## 3 Update your front-end toast logic
+
+```ts
+try {
+  const rsp = await fetch("/api/connect/launchdarkly", { method:"POST", body });
+  const json = await rsp.json();
+  if (!json.success) throw new Error(json.error);
+  toast.success("LaunchDarkly connected ✔");
+} catch (e) {
+  toast.error((e as Error).message ?? "Failed to connect LaunchDarkly");
+}
+```
+
+Now the UI will show messages like:
+
+* **“Token invalid or expired”** – use a fresh server token.
+* **“Project key “blockheads” not found”** – typo in project slug.
+* **“Token lacks read access to this project”** – token scope too narrow.
+
+Once the connection call succeeds you can re-run the **roll-out** wizard; the PATCH helper I provided earlier will work with the validated token + project key.

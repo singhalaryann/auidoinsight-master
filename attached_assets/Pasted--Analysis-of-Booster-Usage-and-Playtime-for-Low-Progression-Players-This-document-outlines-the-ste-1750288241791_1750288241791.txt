@@ -1,0 +1,216 @@
+# Analysis of Booster Usage and Playtime for Low-Progression Players
+
+This document outlines the step-by-step process used to answer the question: **"Do low‑progression players (arena ≤ 10) who fire ≥ 10 boosters in a day log more minutes that day than low‑progression players who fire < 10 boosters/day?"**
+
+## 1. Defining the Question and Hypothesis
+
+The primary goal was to understand if there is a correlation between the number of boosters used and the total playtime for players who are in the early stages of the game (Arena 10 or below).
+
+*   **Group A (Heavy Booster Users):** Players who used ≥ 10 boosters on a given day.
+*   **Group B (Light Booster Users):** Players who used < 10 boosters on a given day.
+*   **Null Hypothesis (H0):** The mean playtime for Group A is the same as for Group B.
+*   **Alternative Hypothesis (H1):** The mean playtime for Group A is different from that of Group B.
+
+To test this, we used Welch's t-test, which is suitable for comparing the means of two independent samples that may have unequal variances.
+
+## 2. Data Extraction and Preparation
+
+The first step was to extract and transform the necessary data from the `bp.data3m` BigQuery table. This involved several steps to isolate the target player segment and their daily activity.
+
+### Step 2.1: Identifying Low-Progression Players
+
+We first needed to identify players who are at or below Arena 10 and, crucially, to determine the date they progressed beyond this point. Any data from after this "cutoff date" would be excluded from the analysis for that user.
+
+This was done with the following query:
+
+```sql
+WITH user_arena_progression AS (
+  SELECT
+    user_id,
+    active_date,
+    CAST(CAST(JSON_EXTRACT_SCALAR(j.element.progression, '$.a') AS FLOAT64) AS INT64) AS arena_level
+  FROM `bp.data3m`
+  CROSS JOIN UNNEST(progression_v2.list) AS j
+  WHERE j.element.progression IS NOT NULL
+    AND JSON_EXTRACT_SCALAR(j.element.progression, '$.a') IS NOT NULL
+    AND JSON_EXTRACT_SCALAR(j.element.progression, '$.a') != ''
+),
+
+user_cutoff_dates AS (
+  -- Find first date when each user crosses arena > 10
+  SELECT
+    user_id,
+    MIN(active_date) AS cutoff_date
+  FROM user_arena_progression
+  WHERE arena_level > 10
+  GROUP BY user_id
+)
+
+daily_booster_usage AS (
+  -- Get daily booster usage (using your existing logic)
+  SELECT
+    user_id,
+    active_date,
+    SUM(
+      CASE
+        WHEN j.element.player_booster_activate IS NULL
+          OR j.element.player_booster_activate = ''
+        THEN 0
+        ELSE ARRAY_LENGTH(SPLIT(j.element.player_booster_activate, ':'))
+      END
+    ) AS boosters_used
+  FROM `bp.data3m`
+  CROSS JOIN UNNEST(game_end_v2.list) AS j
+  WHERE
+    j.element.game_type = 'pvp'
+    AND j.element.boosters IS NOT NULL
+    AND j.element.boosters != ''
+    AND j.element.boosters != '[]'
+  GROUP BY user_id, active_date
+),
+
+daily_playtime AS (
+  -- Get daily playtime from session_data
+  SELECT
+    user_id,
+    active_date,
+    COALESCE(session_data.session_time, 0) AS playtime
+  FROM `bp.data3m`
+  WHERE session_data.session_time IS NOT NULLSELECT
+  boosters_used,
+  COUNT(*) AS num_player_days,
+  AVG(playtime) AS mean_playtime,
+  APPROX_QUANTILES(playtime, 2)[OFFSET(1)] AS median_playtime
+FROM
+  xgcrypt.bp.low_prog_bstr_use_playtime
+WHERE
+  boosters_used IS NOT NULL AND boosters_used > 0
+GROUP BY
+  boosters_used
+ORDER BY
+  boosters_used ASC
+)
+
+-- Final result: combine all data for low-progression players
+SELECT
+  COALESCE(b.user_id, p.user_id) AS user_id,
+  COALESCE(b.active_date, p.active_date) AS active_date,
+  COALESCE(b.boosters_used, 0) AS boosters_used,
+  COALESCE(p.playtime, 0) AS playtime
+FROM daily_booster_usage b
+FULL OUTER JOIN daily_playtime p
+  ON b.user_id = p.user_id AND b.active_date = p.active_date
+LEFT JOIN user_cutoff_dates c
+  ON COALESCE(b.user_id, p.user_id) = c.user_id
+WHERE
+  -- Only include data before cutoff date (or all data if user never exceeded arena 10)
+  (c.cutoff_date IS NULL OR COALESCE(b.active_date, p.active_date) < c.cutoff_date)
+  -- Ensure we have at least some activity for the day
+  AND (COALESCE(b.boosters_used, 0) > 0 OR COALESCE(p.playtime, 0) > 0)
+```
+The result was saved.
+A sample of the resulting table `low_prog_bstr_use_playtime` looks like this:
+
+| Row | user_id                    | active_date | boosters_used | playtime |
+|-----|----------------------------|-------------|---------------|----------|
+| 1   | 0002k8nBZEMnX143umlsRwrZ4gC2 | 2025-01-01  | 2             | 476      |
+
+
+## 3. Statistical Analysis: Welch's T-Test
+
+With the data prepared, we performed Welch's t-test using a Python script to compare the playtime of the two groups.
+
+### Python Script (`questions/code/welch_test.py`)
+
+```python
+import os
+import pandas as pd
+from google.cloud import bigquery
+from scipy import stats
+
+# Set the path to your service account key file
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "bq-readonly-bp-key.json"
+
+# Initialize the BigQuery client
+client = bigquery.Client()
+
+# Define your query
+query = \"\"\"
+WITH player_groups AS (
+  SELECT
+    user_id,
+    active_date,
+    playtime,
+    CASE
+      WHEN boosters_used >= 10 THEN 'group_a' -- More than or equal to 10 boosters
+      WHEN boosters_used < 10 AND boosters_used > 0 THEN 'group_b' -- Less than 10 boosters but more than 0
+      ELSE NULL
+    END AS player_group
+  FROM
+    `xgcrypt.bp.low_prog_bstr_use_playtime`
+)
+SELECT
+  playtime,
+  player_group
+FROM
+  player_groups
+WHERE
+  player_group IS NOT NULL
+\"\"\"
+
+# Run the query
+query_job = client.query(query)
+results = query_job.result()
+
+# Separate the data into two groups
+group_a_playtime = []
+group_b_playtime = []
+
+for row in results:
+  if row['player_group'] == 'group_a':
+    group_a_playtime.append(row['playtime'])
+  elif row['player_group'] == 'group_b':
+    group_b_playtime.append(row['playtime'])
+
+# Perform Welch's t-test
+t_statistic, p_value = stats.ttest_ind(
+    group_a_playtime,
+    group_b_playtime,
+    equal_var=False  # This performs Welch's t-test
+)
+
+print(f"Welch's t-test results:")
+print(f"T-statistic: {t_statistic}")
+print(f"P-value: {p_value}")
+
+# Interpretation of the results
+alpha = 0.05
+if p_value < alpha:
+    print("The difference in mean playtime between the two groups is statistically significant.")
+else:
+    print("The difference in mean playtime between the two groups is not statistically significant.")
+
+print(f"\nGroup A (>= 10 boosters): {len(group_a_playtime)} player-sessions")
+print(f"Group B (< 10 boosters): {len(group_b_playtime)} player-sessions")
+```
+
+## 4. Results and Conclusion
+
+The script produced the following output:
+
+```
+Welch's t-test results:
+T-statistic: 60.69865397639624
+P-value: 0.0
+The difference in mean playtime between the two groups is statistically significant.
+
+Group A (>= 10 boosters): 2433 players
+Group B (< 10 boosters): 1009306 players
+```
+
+*   **T-statistic:** `60.70` - The large positive value indicates that the mean playtime of Group A (heavy users) is substantially greater than that of Group B (light users).
+*   **P-value:** `0.0` - The p-value is effectively zero, which is well below the standard significance level of 0.05.
+
+**Conclusion:** We reject the null hypothesis. There is strong statistical evidence to conclude that low-progression players who use 10 or more boosters in a day log significantly more playtime on that day compared to those who use fewer than 10 boosters.
+
+--- 

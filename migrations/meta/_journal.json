@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1749628335145,
+      "tag": "0000_last_crystal",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1749634790914,
+      "tag": "0001_wild_maggott",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1749636541690,
+      "tag": "0002_chief_devos",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1749641571427,
+      "tag": "0003_overrated_pestilence",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1749642945114,
+      "tag": "0004_freezing_captain_flint",
+      "breakpoints": true
+    }
+  ]
+}

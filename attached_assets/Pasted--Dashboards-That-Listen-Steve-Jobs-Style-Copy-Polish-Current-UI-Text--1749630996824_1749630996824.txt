@@ -1,0 +1,61 @@
+### “Dashboards That Listen” — Steve-Jobs-Style Copy Polish
+
+| Current UI Text                                                                                         | ✨ New Copy (Keep it short, clear, iconic)                                |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Dashboards That Listen (Live)**                                                                       | **Dashboards That Listen** • *Live*                                      |
+| **Analytics Copilot** <br>Ask questions about engagement, retention, monetization, and game performance | **Ask Anything** <br>*Engagement, retention, revenue—just type or talk.* |
+| Search bar placeholder: “Ask about engagement, retention, monetization… or speak naturally”             | *Ask a question…*                                                        |
+| **Ask** (button)                                                                                        | **Go**                                                                   |
+| “Need detailed statistical analysis? Configure time ranges, cohorts, and metrics.”                      | *Need deeper stats?*                                                     |
+| **Deep Analysis** (button)                                                                              | **Deep Dive**                                                            |
+| **Recent Questions**                                                                                    | **Recent Questions**                                                     |
+| (question rows) e.g. “How do new users engage with our platform?”                                       | No change → still conversational.                                        |
+| **Personalized Insights** <br>AI-generated insights from 2 recent questions                             | **Instant Insights** <br>*Answers generated from your last 2 questions.* |
+| Card header **Deep Analysis**                                                                           | **Deep Dive**                                                            |
+| Status pill **Queued / Ready**                                                                          | **Waiting / Ready**                                                      |
+| Sub-label **Engagement**                                                                                | *Engagement* (italics, lighter gray)                                     |
+| **Generate Analysis Brief** (button)                                                                    | **Summarize**                                                            |
+| **View Results** (button)                                                                               | **Open Results**                                                         |
+| Small “x” close icon (keep)                                                                             | (keep)                                                                   |
+
+---
+
+#### Micro-copy Rules (Jobs-inspired)
+
+1. **One idea per line.** No commas if a period works.
+2. **Show action, not method.** “Go”, “Open”, “Deep Dive”.
+3. **Drop techno-jargon.** Users know it’s statistical; say “Deep Dive” instead.
+4. **Lowercase helper lines.** They whisper, titles speak.
+5. **Brevity = confidence.**
+
+---
+
+#### Example — How It Reads After Polish
+
+```
+Dashboards That Listen  • Live
+
+Ask Anything
+Engagement, retention, revenue—just type or talk.
+
+[ Ask a question… ]  ( mic )   Go
+
+Need deeper stats?                    Deep Dive
+
+Recent Questions
+How do new users engage with our platform?         11 Jun 2025
+What’s our weekly retention rate?                  10 Jun 2025
+
+Instant Insights
+Answers generated from your last 2 questions.
+
+Deep Dive    “How do new users engage with our platform?”      Waiting   ✕
+   Engagement
+   Summarize
+
+Deep Dive    “What’s our weekly retention rate?”               Ready     ✕
+   Engagement
+   Open Results
+```
+
+This copy **gets out of the way**, letting the product feel obvious and inevitable—exactly how Jobs liked it.

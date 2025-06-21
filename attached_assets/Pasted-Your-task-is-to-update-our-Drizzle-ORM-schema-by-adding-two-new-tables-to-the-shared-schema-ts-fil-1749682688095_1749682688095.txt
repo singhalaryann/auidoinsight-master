@@ -1,0 +1,34 @@
+Your task is to update our Drizzle ORM schema by adding two new tables to the `shared/schema.ts` file.
+
+Please follow these instructions carefully:
+
+1.  **Open and edit the `shared/schema.ts` file.**
+
+2.  **Define the `snapshot_metrics` Table:**
+    *   Create a new table schema definition named `snapshot_metrics`.
+    *   Add an `id` column to be its primary key, using the serial data type.
+    *   Add a `name` column using the text data type, and it cannot be null.
+    *   Add a `tags` column that is a non-nullable array of text.
+    *   Add a `metric_type` column using the text data type, and it cannot be null.
+    *   Add a `source_query` column using the text data type, and it cannot be null.
+    *   Add a `query_params` column using the JSONB data type, and it cannot be null.
+    *   Add a `display_config` column using the JSONB data type, and it cannot be null.
+    *   Add a `current_payload` column using the JSONB data type, which is nullable.
+    *   Add a `last_updated` column using the timestamp data type, which is nullable.
+
+3.  **Define the `snapshot_insights` Table:**
+    *   Create a new table schema definition named `snapshot_insights`.
+    *   Add an `id` column to be its primary key, using the serial data type.
+    *   Add a `title` column using the text data type, and it cannot be null.
+    *   Add a `tags` column that is a non-nullable array of text.
+    *   Add an `is_active` column using the boolean data type with a default value of `true`.
+    *   Add a `content_payload` column using the JSONB data type, and it cannot be null.
+    *   Add a `linked_metric_id` column using the integer data type. This column must include a foreign key reference to the `id` column of the `snapshot_metrics` table.
+
+4.  **Add Zod Schemas:**
+    *   In the section with Zod schema definitions, create and export a new Zod schema for insertions into the `snapshot_metrics` table.
+    *   Create and export another new Zod schema for insertions into the `snapshot_insights` table.
+
+5.  **Export New Types:**
+    *   At the end of the file, add type exports for `SnapshotMetric` and `SnapshotInsight` based on the new table schemas.
+    *   Also, ensure you export the inferred Zod types for `InsertSnapshotMetric` and `InsertSnapshotInsight`.

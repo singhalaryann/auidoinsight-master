@@ -1,0 +1,85 @@
+```ts
+/**
+ * analyticsParser.ts
+ * ------------------------------------------------------------
+ * Tiny helper that sends the *system prompt* + the user’s free-form
+ * analytics question to OpenAI and returns the JSON parser result.
+ * Front-end TypeScript (Vite/Next/CRA)—uses the official OpenAI SDK.
+ * ------------------------------------------------------------
+ */
+
+import OpenAI from "openai";
+
+/* 1.  Initialise the SDK  */
+const openai = new OpenAI({
+  // ⚠️  Don’t ship keys to the browser in prod!
+  //      Expose a proxy route or read from env at build time.
+  apiKey: import.meta.env.VITE_OPENAI_API_KEY
+});
+
+/* 2.  The parser instructions (system prompt) */
+const SYSTEM_PROMPT = `
+You are **Analytics Copilot – Query Parser**.
+< …  paste the full procedure block I gave earlier … >
+`;
+
+/* 3.  A tiny wrapper function */
+export async function parseAnalyticsQuestion(
+  userQuestion: string
+): Promise<{
+  is_ambiguous: boolean;
+  parsed_request: {
+    subject_cohort: string | null;
+    comparison_cohort: string | null;
+    metric: string | null;
+    time_window: string | null;
+    success_criterion: string | null;
+  };
+  clarifying_questions: string[];
+}> {
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    temperature: 0,
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      { role: "user", content: userQuestion }
+    ]
+  });
+
+  /* 4.  The parser always replies with a JSON string  */
+  const content = completion.choices[0].message.content ?? "{}";
+  return JSON.parse(content);
+}
+
+/* 5.  Example call (call from your component / hook) */
+(async () => {
+  const result = await parseAnalyticsQuestion(
+    "Are booster users heavy drivers?"
+  );
+
+  if (result.is_ambiguous) {
+    // 👋 Show result.clarifying_questions in the UI
+  } else {
+    // ✅ We have a fully-specified request → enable “Go”
+  }
+})();
+```
+
+**How to wire it in the UI**
+
+```tsx
+// in AskBox.tsx
+const handleAsk = async () => {
+  setLoading(true);
+  const parsed = await parseAnalyticsQuestion(input); // ← function above
+  setLoading(false);
+
+  if (parsed.is_ambiguous) {
+    setFollowUps(parsed.clarifying_questions); // show modal or inline prompts
+  } else {
+    runQuery(parsed.parsed_request); // your existing “Go” handler
+  }
+};
+```
+
+*That’s all—the user’s question and the system prompt travel together in the `messages` array, exactly as the Chat Completion API expects.*

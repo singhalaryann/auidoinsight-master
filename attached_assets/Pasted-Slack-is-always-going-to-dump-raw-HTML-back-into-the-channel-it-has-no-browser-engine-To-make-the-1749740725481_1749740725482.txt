@@ -1,0 +1,171 @@
+Slack is *always* going to dump raw HTML back into the channel—it has no browser engine.
+To make the form flow feel native you must send **Block Kit JSON** (or a `views.open` modal payload), never an HTML string.
+
+---
+
+### Why you’re seeing the HTML
+
+| What happened                                                      | Why Slack shows code                                                                                                                                    |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Your slash-command (or bot) handler replied with an HTML document. | Slack treats any non-JSON text as plain text; it escapes `<html>` etc. and shows it in a code block.                                                    |
+| You expected the HTML to “render” in the message or modal.         | Slack clients can’t execute or embed HTML/JS for security reasons. Only [https://slack.com/block-kit](https://slack.com/block-kit) blocks are rendered. |
+
+---
+
+## Fix: use Block Kit + Modals instead of HTML
+
+Below is a **minimal working example** in Bolt-TS that reproduces your flow without ever touching HTML.
+
+```ts
+// /src/app.ts
+import { App } from '@slack/bolt';
+const app = new App({
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  socketMode: true,
+  appToken: process.env.SLACK_APP_TOKEN,
+});
+
+/* 1️⃣ /analyse slash command opens first modal */
+app.command('/analyse', async ({ ack, body, client }) => {
+  await ack();
+  await client.views.open({
+    trigger_id: body.trigger_id,
+    view: buildQuestionModal(''),     // helper below
+  });
+});
+
+/* 2️⃣ handle first modal submission */
+app.view('question_submit', async ({ ack, body, view, client }) => {
+  await ack();
+
+  const q = view.state.values.q.input.value;
+  const parsed = await analyseSetup(q);        // hit /api/analysis-setup
+
+  if (parsed.needsClarification) {             // Path B
+    await client.views.push({
+      trigger_id: body.trigger_id,
+      view: buildClarifyModal(parsed.gaps),    // helper below
+    });
+  } else {                                     // Path A
+    await enqueueQuestion(parsed.enhanced);    // /api/questions
+    await client.chat.postEphemeral({
+      channel: body.user.id,
+      user: body.user.id,
+      text: '✅ Question submitted. I’ll ping you when the insight is ready.',
+    });
+  }
+});
+
+/* 3️⃣ handle clarification modal */
+app.view('clarify_submit', async ({ ack, view, body }) => {
+  await ack();
+  const filled = collectClarifyAnswers(view);
+  await enqueueQuestion(filled);
+  await app.client.chat.postEphemeral({
+    channel: body.user.id,
+    user: body.user.id,
+    text: '✅ Clarified question submitted.',
+  });
+});
+
+/* Helpers --------------------------------------------------------- */
+function buildQuestionModal(prefill: string) {
+  return {
+    type: 'modal',
+    callback_id: 'question_submit',
+    title: { type: 'plain_text', text: 'Ask a Question' },
+    submit: { type: 'plain_text', text: 'Analyse' },
+    blocks: [
+      {
+        type: 'input',
+        block_id: 'q',
+        element: {
+          type: 'plain_text_input',
+          action_id: 'input',
+          initial_value: prefill,
+          placeholder: {
+            type: 'plain_text',
+            text: 'e.g. What’s our weekly retention rate?',
+          },
+        },
+        label: { type: 'plain_text', text: 'Question' },
+      },
+      {
+        type: 'actions',
+        block_id: 'qs',
+        elements: [
+          {
+            type: 'button',
+            action_id: 'preset_retention',
+            text: { type: 'plain_text', text: 'Weekly retention' },
+            value: 'What’s our weekly retention rate?',
+          },
+          {
+            type: 'button',
+            action_id: 'preset_arpdau',
+            text: { type: 'plain_text', text: 'ARPDAU (30 d)' },
+            value: 'What is ARPDAU for the last 30 days?',
+          },
+          {
+            type: 'button',
+            action_id: 'voice',
+            url: 'https://your-dashboard.com/voice',
+            text: { type: 'plain_text', text: '🎙️ Voice' },
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function buildClarifyModal(gaps: GapSpec[]) {
+  return {
+    type: 'modal',
+    callback_id: 'clarify_submit',
+    title: { type: 'plain_text', text: 'Need a bit more…' },
+    submit: { type: 'plain_text', text: 'Run' },
+    blocks: gaps.flatMap(renderGapBlock),
+  };
+}
+
+app.action(/preset_.*/, async ({ ack, body, client, action }) => {
+  await ack();
+  const preset = (action as any).value;
+  // Overwrite the input inside the existing modal
+  await client.views.update({
+    view_id: body.view!.id,
+    hash: body.view!.hash,
+    view: buildQuestionModal(preset),
+  });
+});
+
+/* --------------------------------------------------------------- */
+(async () => {
+  await app.start();
+  console.log('⚡️ Bolt app running');
+})();
+```
+
+### What changed vs. your current code?
+
+1. **All responses to Slack are JSON** (`views.open`, `views.update`, `chat.postEphemeral`).
+2. **No HTML is ever returned**. The React/HTML page you built stays on your own dashboard domain; Slack only hears the URL when users need to jump out for voice input or deep-dive charts.
+
+---
+
+## Common gotchas checklist
+
+| Symptom                | Fix                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Raw HTML still appears | Ensure your express route **`res.json({...})`** (or Bolt `ack`) returns a JSON body; don’t `res.send(html)`.                               |
+| Modal doesn’t open     | You must `await ack()` *before* any heavy work and then call `views.open` with the `trigger_id` from the interaction.                      |
+| Timeout warnings       | Slack needs an acknowledgement within **3 s**, so off-load OpenAI parsing to an async worker or queue.                                     |
+| Need charts/images     | Render server-side (Matplotlib, Chart.js headless) → `files.upload` or `image_url` in a section block.                                     |
+| Voice capture          | Not supported inside Slack – use a button that opens your hosted recorder page and returns text back to Slack via an endpoint or shortcut. |
+
+---
+
+### TL;DR
+
+Slack can’t display HTML. Return **Block Kit JSON** (`views.open`, `chat.postMessage`, etc.) from your bot instead, and your modal-based wizard will render perfectly inside Slack.

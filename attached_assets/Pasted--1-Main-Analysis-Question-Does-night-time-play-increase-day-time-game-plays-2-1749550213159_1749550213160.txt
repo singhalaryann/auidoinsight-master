@@ -1,0 +1,30 @@
+### 1 · Main Analysis Question
+
+**“Does night-time play increase day-time game plays?”**
+
+---
+
+### 2 · Clarification Sub-Questions (shown to the user before running the analysis)
+
+| # | Clarification Needed                                                           | Example Default / Placeholder                                          |
+| - | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
+| 1 | **Define “night-time” vs “day-time”**<br>Specify clock ranges (HH\:MM–HH\:MM). | Night-time: 00 :00–04 :59<br>Day-time: 08 :00–19 :59                   |
+| 2 | **Outcome window**<br>When should extra day-time sessions be counted?          | Same calendar day, next calendar day, or custom N-day window           |
+| 3 | **Player cohort**<br>Which players to include?                                 | All active players / New installs only / Paying users / Custom segment |
+| 4 | **Date range**<br>Data extraction period.                                      | 2025-01-01 → 2025-04-30                                                |
+
+---
+
+### 3 · Key UI Changes to Support a “Deep-Research” Confirmation Modal
+
+| Area                         | Change                                                                                                                                                                                                                                                                                                  | Rationale                                                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| **Trigger**                  | Add a **“Run Deep Analysis”** button next to quick-stats widgets.                                                                                                                                                                                                                                       | Explicit entry point to advanced workflow.                             |
+| **Modal Layout**             | Use a **two-step modal**:<br>**Step 1:** Show the main question in bold for confirmation.<br>**Step 2:** Display a dynamic form containing the four clarifying fields (time ranges, outcome window, cohort selector, date range).                                                                       | Mirrors “question → details” flow; keeps first step cognitively light. |
+| **Input Components**         | • **Time-range pickers** with 24-h sliders.<br>• **Outcome window dropdown** (same day / next day / custom) with secondary numeric input when “custom” is chosen.<br>• **Cohort multi-select** with search & preset tags.<br>• **Date-range picker** with quick presets (last 30 d, last 90 d, custom). | Captures all required parameters precisely and quickly.                |
+| **Validation & Defaults**    | Pre-fill each field with sensible defaults (see placeholders above). Highlight incomplete fields in red; disable **“Run Analysis”** until all are valid.                                                                                                                                                | Prevents accidental runs and guides the user.                          |
+| **Summary Banner**           | At the top of Step 2 show a live “Analysis Setup Preview” sentence that concatenates chosen options (e.g., “Compare day-time sessions on the next calendar day for new installs between 1 Jan – 30 Apr 2025…”).                                                                                         | Gives immediate feedback; reduces mis-config errors.                   |
+| **Confirmation & Execution** | Primary button **“Run Analysis”**; secondary **“Back”**; tertiary **“Cancel”**. When executed, collapse modal and show a toast: “Analysis started. Results will appear in the Insights tab.”                                                                                                            | Clear UX affordances and progress feedback.                            |
+| **Responsiveness**           | Ensure the modal fits 320 px wide for mobile; stack labels above inputs; keep buttons full-width.                                                                                                                                                                                                       | Mobile usability.                                                      |
+
+These changes let users review the core question, supply critical parameters, and launch the statistical workload with confidence—matching the “ask first, compute later” philosophy of deep-research mode.

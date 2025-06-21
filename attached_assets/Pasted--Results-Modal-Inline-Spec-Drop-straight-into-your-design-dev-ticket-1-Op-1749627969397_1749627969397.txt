@@ -1,0 +1,72 @@
+### “Results” Modal — Inline Spec
+
+*(Drop straight into your design / dev ticket.)*
+
+---
+
+#### 1. Open-Trigger
+
+* **Button label on card:** **Results** (only visible when `status = completed`).
+* **CTA location:** Right-edge of experiment card, accent color = blue 600.
+* **On click:** Opens centered modal `width: 880 px` `padding: 32 px` `border-radius: 12 px`.
+
+---
+
+#### 2. Modal Anatomy
+
+| Zone                          | Components & Copy                                                                                                                                                                                                  | Notes                                                                                |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| **Header**                    | • Left icon 📈 (`trend-up`)<br>• **Title** = `{Primary metric label} +{Δ} {unit}` <br>• Date stamp `DD / MM / YYYY UTC` (gray 500) <br>• Status pill **Ready** (green 100 / text green 700) <br>• **×** close icon | Title example: **“Weekend play drives next-day retention +16 pp”**                   |
+| **Lead-in Sentence**          | *“{Winning variant} shows {relative Δ} {metric} compared with {baseline variant}.”*                                                                                                                                | 14 pt / 180 line-height.                                                             |
+| **Metric Badges**             | • **+27 % Lift** (blue 50 bg, blue 700 text) <br>• **1.0 e-300 p-value** (gray 50 bg) <br>• **0.14 δ** (gray 50)                                                                                                   | Each badge: 24 px height, 12 px padding, 4 px radius. Tooltip on hover: define term. |
+| **Key Metrics Table**         | **Columns:** Group · Metric % · Absolute ↑ (pp) · Relative ↑ % <br>**Rows:** Winning variant first (bold), baseline second                                                                                         | 40 px row height, zebra striping gray 50.                                            |
+| **Impact Visualization**      | Bar chart (blue for win, gray 300 for baseline) <br>Static PNG generated server-side OR mini Chart.js                                                                                                              | Height = 120 px. Y-axis hidden; X-axis labels centred.                               |
+| **Business Interpretation**   | Bulleted narrative (4–5 bullets, 14 pt) auto-generated:  <br>  • Significance statement  <br>  • Practical impact  <br>  • Caveats  <br>  • Recommended next action                                                | Copy tone: crisp, declarative.                                                       |
+| **Technical Footer**          | 10 pt gray 600: data window, sample size, test type.                                                                                                                                                               | Example: *“2 × 2 χ² on 333k player-days, Jan – Mar 2025; no seasonality controls.”*  |
+| **Action Buttons**            | • **SQL Query**  (left, ghost) <br>• **Python Script** (ghost) <br>• **Statistical Backing** (ghost)                                                                                                               | Each opens code viewer modal; copy-to-clipboard icon inside.                         |
+| **CTA Row (if variant wins)** | Right-aligned primary button: **Roll out Variant B** <br>Ghost secondary: **Duplicate Test**                                                                                                                       | CTA bar appears only if `winner != control`.                                         |
+
+---
+
+#### 3. Progressive Disclosure
+
+| Element       | Interaction                                            |
+| ------------- | ------------------------------------------------------ |
+| Table rows    | Hover → tooltip with raw counts (e.g., “n = 152 340”). |
+| p-value badge | Click → slide-in shows test type, effect size, CI.     |
+| Chart         | Click bar → toggles to cumulative line chart version.  |
+
+---
+
+#### 4. Empty & Edge States
+
+| Scenario               | UX                                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Metrics still updating | Replace header pill **Ready** → **Updating…** (yellow 100). Under badges show spinner + *“Long-term metrics updating, check back in {X d}.”* |
+| No sig difference      | Header title adapts: **“No meaningful change detected”**; badges: “Δ 0 %” gray; Roll-out CTA hidden.                                         |
+| Error fetch            | Toast: *“Hmm, can’t load results right now. Retry?”* & “View raw table” fallback link.                                                       |
+
+---
+
+#### 5. Copy Snippets (Jobs-style)
+
+* **Lift badge tooltip:** “Relative improvement over control.”
+* **Interpretation intro:** “What it means for the business.”
+* **Roll-out confirm modal:**
+
+  > **“Ship the winning experience?”**
+  > Rolling out Variant B makes it the new default for all players.
+  > Buttons: **Roll Out** · Cancel
+
+---
+
+#### 6. Dev Specs
+
+* **Modal**: `z-index 1400`, backdrop 60 % black @ 0.15 opacity.
+* **Chart**: Use same blue token as dashboard Pulse graph (`#377DFF`).
+* **API**: `GET /experiments/{id}/results` returns `summary`, `metrics[]`, `chartData`, `sql`, `python`, `ci`.
+* **Perf budget**: load ≤ 400 ms on cached hit.
+
+---
+
+Plug this modal alongside the existing wizard; no other screens need alteration.

@@ -1,0 +1,222 @@
+
+# 
+We need to know if rank changes in leaderboards affect retention.
+
+Fetch the games played by the users
+```sql
+SELECT
+  active_date,
+  user_id,
+  ev.element.event_timestamp AS event_timestamp,
+  ev.element.game_type AS game_type,
+  ev.element.result AS result,
+  ev.element.game_id AS game_id
+FROM `xgcrypt`.`bp`.`data3m`
+CROSS JOIN UNNEST(game_end_v2.list) AS ev
+WHERE ev.element.event_timestamp IS NOT NULL
+  AND ev.element.game_type IS NOT NULL
+```
+
+Saved as stg_user_games_played
+Looks like 
+Row	active_date	user_id	event_timestamp	game_type	result
+1	2025-03-15	C5qCCbzXocPzDlRoqIWAC3ssixy2	1742052992000000	pvp	lose
+
+Fetch a user's rank each day and change
+
+We will fetch the rank and climb of users each day 
+```sql
+WITH raw AS (                       -- unpack every leaderboard event
+  SELECT
+    active_date,
+    user_id,
+    ev.element.rank            AS rank,
+    ev.element.event_timestamp AS ts
+  FROM `xgcrypt`.`bp`.`data3m`
+  CROSS JOIN UNNEST(leaderboard.list) AS ev
+),
+
+daily AS (                          -- grab first & last rank per day
+  SELECT
+    active_date,
+    user_id,
+    ARRAY_AGG(rank ORDER BY ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS rank
+  FROM raw
+  GROUP BY active_date, user_id
+),
+
+filtered AS (
+  SELECT *
+  FROM daily 
+  WHERE rank IS NOT NULL AND rank <> -1
+),
+
+with_delta AS (
+  SELECT
+    *,
+    LAG(rank) OVER (
+      PARTITION BY user_id 
+      ORDER BY SAFE_CAST(active_date AS DATE)
+    ) - rank AS rank_delta
+  FROM filtered
+)
+
+
+SELECT *
+FROM with_delta
+ORDER BY active_date, user_id
+```
+
+saved as 
+stg_user_rank_each_day
+
+Looks like
+active_date	user_id	rank	rank_delta
+2025-03-31	zmb42ZbdY8SDVpWnLhRS9SlbatE2	40	-34
+
+
+```sql
+-- Contingency table: gained_rank_today vs. played_next_day
+
+WITH ranked AS ( -- tag each player-day: 1 = gained rank today
+SELECT
+active_date,
+user_id,
+ 
+-- Rule A: you already have rank_delta in the table
+CASE WHEN rank_delta > 0 THEN 1 ELSE 0 END AS gained
+FROM `bp.stg_user_rank_each_day`
+),
+ 
+next_day AS ( -- did that user appear tomorrow?
+SELECT
+r.active_date,
+r.user_id,
+r.gained,
+CASE
+WHEN EXISTS (
+SELECT 1
+FROM `bp.stg_user_games_played` p
+WHERE p.user_id = r.user_id
+AND p.active_date = DATE_ADD(r.active_date, INTERVAL 1 DAY)
+)
+THEN 1 -- played next day
+ELSE 0 -- absent next day
+END AS played_next_day
+FROM ranked AS r
+),
+ 
+contingency AS ( -- aggregate to 2×2
+SELECT
+gained,
+played_next_day,
+COUNT(*) AS n
+FROM next_day
+GROUP BY gained, played_next_day
+)
+ 
+SELECT *
+FROM contingency
+ORDER BY gained, played_next_day;
+```
+Result
+
+Row	gained	played_next_day	n
+1	0	0	104771
+2	0	1	154966
+3	1	0	17830
+4	1	1	55893
+
+Now we apply chi squared test for statistical significance
+```python
+import pandas as pd
+import scipy.stats as stats
+ 
+# paste or load the SQL result ---------------------------------------------
+data = {
+"gained": [0, 0, 1, 1],
+"played_next_day": [0, 1, 0, 1],
+"n": [ 104771.0, 154966.0, 17830.0, 55893.0 ] 
+}
+df = pd.DataFrame(data)
+ 
+# build the 2×2 matrix in the right order -----------------------------------
+table = (
+df.pivot(index="gained", columns="played_next_day", values="n")
+.loc[[0, 1], [0, 1]] # ensure rows/cols ordered 0,1
+.to_numpy()
+)
+ 
+chi2, p, dof, expected = stats.chi2_contingency(table, correction=False)
+ 
+print(f"χ² = {chi2:.4f}")
+print(f"p-value = {p:.4g}")
+print("expected counts:\n", expected)
+```
+# P R 
+```bash
+χ² = 6444.0460
+p-value = 0
+expected counts:
+ [[ 95495.75942242 164241.24057758]
+ [ 27105.24057758  46617.75942242]]
+```
+# Interpretation
+### What the χ² output says
+ 
+| Metric | Value | Meaning |
+| ---------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| **χ²** | **6 444.05** | The observed counts are **far** from what we’d expect if “rank gain” and “next-day play” were unrelated. |
+| **Degrees of freedom** | 1 | A 2 × 2 table always has 1 d.f. |
+| **p-value** | < 1 × 10⁻³⁰⁰ (printed as 0) | The probability of seeing a difference this large by random chance is effectively zero ⇒ **reject the null hypothesis of independence**. |
+| **Expected counts** | See matrix below | What the cell frequencies would look like under independence. Large gaps between observed and expected fuel the χ² statistic. |
+ 
+**Expected vs. observed**
+ 
+| | **Did *not* play next day** | **Played next day** | Row total |
+| ----------------------------- | ---------------------------------- | ----------------------------------- | --------- |
+| **No rank gain** (gained = 0) | 95 495.8 ← exp.<br/>104 771 ← obs. | 164 241.2 ← exp.<br/>154 966 ← obs. | 259 737 |
+| **Rank gain** (gained = 1) | 27 105.2 ← exp.<br/>17 830 ← obs. | 46 617.8 ← exp.<br/>55 893 ← obs. | 73 723 |
+| **Column total** | 122 601 | 210 859 | 333 460 |
+ 
+Biggest deviations:
+ 
+* **Rank gain & login**: you *expected* 46 618 logins, saw **55 893** (+9 275).
+* **No gain & no login**: you *expected* 95 496 absences, saw **104 771** (+9 275).
+ 
+Those mirror-image gaps generate the huge χ².
+ 
+---
+ 
+### Practical lift: next-day retention
+ 
+| Group | Next-day retention | Absolute ↑ | Relative ↑ |
+| ------------- | ------------------------------ | ------------------------ | ---------- |
+| **Rank gain** | 55 893 / 73 723 ≈ **75.8 %** | | |
+| **No gain** | 154 966 / 259 737 ≈ **59.7 %** | | |
+| | **+16.1 pp** | **× 1.27** (27 % higher) | |
+ 
+*Players who improved their leaderboard rank were roughly **16 percentage-points** more likely to return the next day—a **27 %** uplift.*
+ 
+---
+ 
+### Effect size (Φ / Cramer’s V)
+ 
+$$
+\varphi \;=\;\sqrt{\tfrac{\chi^2}{N}}
+\;=\;\sqrt{\tfrac{6444.0}{333\,460}}
+\approx\;0.14
+$$
+ 
+A Φ of ≈ 0.14 is a **small-to-medium** association by conventional thresholds (0.1 = small, 0.3 = medium).
+ 
+---
+ 
+### Take-aways
+ 
+1. **Statistically significant:** Rank gains and next-day log-ins are *not* independent (p ≪ 0.05).
+2. **Directionally positive:** Rank-gainers show materially higher next-day retention (75.8 % vs 59.7 %).
+3. **Magnitude:** While the effect isn’t enormous in relative-risk terms (×1.27), at your scale (\~330 k player-days) it’s meaningful.
+4. **Causality caution:** The test shows association, not cause → players who are already more engaged may both climb the leaderboard *and* come back. Running an experiment (e.g., surfacing rank gains via notifications) would help isolate true causal lift.
+ 
+Use these numbers to justify deeper experiments or feature tweaks—e.g., highlight rank improvements in post-match screens or push notifications and track incremental login lift.

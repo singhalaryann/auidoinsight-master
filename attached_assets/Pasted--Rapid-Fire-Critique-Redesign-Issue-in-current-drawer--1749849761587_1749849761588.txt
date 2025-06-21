@@ -1,0 +1,84 @@
+### Rapid-Fire Critique → Redesign
+
+| Issue in current drawer                                           | Why it hurts                                        | Fix                                                                                                                             |
+| ----------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| **50 % / 100 %** traffic numbers buried in gray under “Variants”. | Hard to spot uneven allocation (looks like a typo). | Move traffic split to a pill next to variant label:<br>`Control • 50 %`  `Variant B • 50 %`<br>Color text when split ≠ planned. |
+| Delta & p-value chips float far right in header.                  | Eye ping-pongs left ↔ right; PM misses them.        | Group **Δ / p / power** in one compact “pulse cluster” under status pill.                                                       |
+| “Power 65 %” shows but no indicator whether that’s good or bad.   | Non-statisticians don’t know 80 % is the goal.      | Use colored badge: `Power 65 % ⚠️` (yellow) with tooltip “Need ≥ 80 % for confident read”.                                      |
+| ETA buried in gray text.                                          | Time-to-decision is critical.                       | Show **Countdown pill**: `ETA 7 d` alongside progress bar.                                                                      |
+| Duplicate button same weight as Pause.                            | Duplicate is low-frequency; Pause is critical.      | Downgrade Duplicate to overflow “⋮” menu; keep Pause / Stop Early primary.                                                      |
+| No quick chart.                                                   | Users crave trend hint.                             | Add mini delta-spark (32×80 px) below pulse cluster.                                                                            |
+| Trash-bin icon small & red (looks destructive).                   | Accidental delete risk.                             | Move delete to overflow menu, require confirm modal.                                                                            |
+
+---
+
+## Redesigned Drawer (wireframe)
+
+```plain
+┌─────────────────────────────────────────────────────────────────────────┐
+│  New Booster UX                running 🟢    Δ +2.3 pp   p 0.07   Pow 65⚠ │
+│  1 / 7 days  ▬▬▬▬░░░░░  ETA 7 d                                       │
+├─────────────────────────────────────────────────────────────────────────┤
+│ Variants                 Traffic     Metric (Engagement Score)         │
+│ ● Control                50 %        42 %                              │
+│ ● Variant B              50 %        44.3 %   (+2.3 pp)                │
+│                                                                       │
+│  tiny sparkline here  ┈┈╱╲╱╲╱                                          │
+│                                                                       │
+│  Actions:  [ Pause ]  [ Stop Early ]         ⋮                         │
+└─────────────────────────────────────────────────────────────────────────┘
+Overflow (⋮): Duplicate • Delete • View History
+```
+
+### Key Elements
+
+1. **Pulse Cluster** (Δ, p, Power) together; color rules:
+
+   * Δ text green/red when p < 0.05; gray otherwise.
+   * Power < 50 % gray, 50–79 % yellow “⚠”, ≥ 80 % green check.
+
+2. **Progress Bar** right under title (fills by elapsed ÷ planned days). Thin 6 px line, brand blue.
+
+3. **Countdown Pill** shows dynamic ETA; turns orange if ETA > planned test length (indicates under-powered).
+
+4. **Mini Sparkline** (primary metric delta day-by-day). Hover reveals daily values; keeps row height \~160 px.
+
+5. **Actions Row**
+
+   * Primary = Pause (ghost)
+   * Danger = Stop Early (red, only enabled if Δ negative & p < 0.05)
+   * Overflow menu for edge actions.
+
+6. **Keyboard/Screen-reader**
+
+   * Entire drawer focusable; arrow keys navigate variants table; buttons have aria-labels (“Pause test Booster UX”).
+
+---
+
+## Micro-copy Updates
+
+| Old                                        | New                                              |
+| ------------------------------------------ | ------------------------------------------------ |
+| “Collecting data – need 14 k more samples” | “Need 14 k more users for 80 % power (est. 7 d)” |
+| “Not significant yet”                      | remove (redundant—p chip conveys)                |
+| Pause button tooltip                       | “Freeze traffic; users see Control only.”        |
+
+---
+
+## Visual Tokens
+
+| Token                | Value                                 |
+| -------------------- | ------------------------------------- |
+| `statusRunning` pill | bg #D1FAE5 (emerald-50), text #065F46 |
+| `powerLow` badge     | bg #FEF3C7 (amber-100), text #92400E  |
+| `progressFill`       | #3B82F6                               |
+| `deltaPositive`      | #059669                               |
+| `deltaNegative`      | #DC2626                               |
+
+---
+
+### Result
+
+*Glance* → know if variant is trending, significant, and when you can decide.
+*Act* → Pause or Stop Early with a single visible button.
+*Focus* → less clutter, clear hierarchy, safe destructive actions.

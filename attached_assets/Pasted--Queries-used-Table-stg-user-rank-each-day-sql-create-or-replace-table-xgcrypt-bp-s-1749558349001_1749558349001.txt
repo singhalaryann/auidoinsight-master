@@ -1,0 +1,434 @@
+
+# Queries used
+
+## Table : stg_user_rank_each_day
+
+```sql
+create or replace table `xgcrypt`.`bp`.`stg_user_rank_each_day`
+
+  
+
+OPTIONS()
+
+as (
+
+  
+
+WITH raw AS ( -- unpack every leaderboard event
+
+SELECT
+
+active_date,
+
+user_id,
+
+ev.element.rank AS rank,
+
+ev.element.event_timestamp AS ts
+
+FROM `xgcrypt`.`bp`.`data3m`
+
+CROSS JOIN UNNEST(leaderboard.list) AS ev
+
+),
+
+  
+
+daily AS ( -- grab first & last rank per day
+
+SELECT
+
+active_date,
+
+user_id,
+
+  
+
+-- earliest rank seen that day (may be -1 if off-board)
+
+ARRAY_AGG(rank ORDER BY ts ASC LIMIT 1)[SAFE_OFFSET(0)] AS day_start_rank,
+
+  
+
+-- latest rank seen that day
+
+ARRAY_AGG(rank ORDER BY ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS day_end_rank
+
+FROM raw
+
+GROUP BY active_date, user_id
+
+)
+
+  
+
+SELECT *
+
+FROM daily
+
+ORDER BY active_date, user_id
+
+);
+
+```
+
+## Table : stg_user_games_played
+```sql
+create or replace table `xgcrypt`.`bp`.`stg_user_games_played`
+
+  
+
+OPTIONS()
+
+as (
+
+  
+
+SELECT
+
+active_date,
+
+user_id,
+
+ev.element.event_timestamp AS event_timestamp,
+
+ev.element.game_type AS game_type,
+
+ev.element.result AS result,
+
+ev.element.game_id AS game_id
+
+FROM `xgcrypt`.`bp`.`data3m`
+
+CROSS JOIN UNNEST(game_end_v2.list) AS ev
+
+WHERE ev.element.event_timestamp IS NOT NULL
+
+AND ev.element.game_type IS NOT NULL
+
+);
+```
+
+## Matrics :
+```sql
+-- STEP 1 ─ daily rank movement
+
+WITH rank_change AS (
+
+SELECT
+
+user_id,
+
+active_date,
+
+day_start_rank,
+
+day_end_rank,
+
+-- “gained” = moved up OR entered from off-board (-1 → 50 etc.)
+
+CASE
+
+WHEN day_start_rank = -1 AND day_end_rank >= 0 THEN 1
+
+WHEN day_start_rank > day_end_rank THEN 1
+
+ELSE 0
+
+END AS gained_rank
+
+FROM `bp.stg_user_rank_each_day`
+
+),
+
+  
+
+-- STEP 2 ─ flag whether the same player played the NEXT day
+
+next_day_sessions AS (
+
+SELECT DISTINCT
+
+user_id,
+
+DATE_SUB(active_date, INTERVAL 1 DAY) AS active_date -- back-shift
+
+FROM `bp.stg_user_games_played`
+
+),
+
+  
+
+-- STEP 3 ─ join & collapse to the 2×2 cells
+
+contingency AS (
+
+SELECT
+
+gained_rank, -- 1 = rank up, 0 = no gain / drop
+
+IF(nd.user_id IS NULL, 0, 1) AS played_next_day,
+
+COUNT(*) AS n_players -- cell count
+
+FROM rank_change rc
+
+LEFT JOIN next_day_sessions nd
+
+USING (user_id, active_date)
+
+GROUP BY 1, 2
+
+)
+
+  
+
+SELECT * FROM contingency ORDER BY gained_rank, played_next_day;
+```
+
+# Deep Dive
+
+# 1. Do Rank-Climbing Players Come Back Equally Across Rank Tiers?
+
+**One-line takeaway**  
+Players who start a day with rank ≤ 25 and improve their rank are **~9 percentage-points** more likely to return the next day, while lower-rank players who improve show **no uplift (–3 pp)**.
+
+**In plain English (2-3 lines)**
+
+- When already sitting at rank 25 or better, moving up further is linked with a clear bump in next-day log-ins.
+    
+- For everyone else (rank 26 +), a small climb doesn’t seem to motivate a comeback and may even be associated with a slight drop.
+    
+- These are correlations, not proven causes—try targeted experiments to see whether highlighting rank gains _drives_ retention.
+    
+
+---
+
+## Detailed Analysis
+
+### Business question
+
+> **“For players whose start-of-day rank is ≤ 25 (‘high-rank’) versus ≥ 26 (‘low-rank’), does climbing the leaderboard raise next-day return to the same degree?”**
+
+---
+
+### Chain of thought → actions → intermediate results
+
+|Step|Action / Query (abridged)|Result|
+|---|---|---|
+|1|**Define cohorts**`rank_tier = 'High' if day_start_rank ≤ 25 else 'Low'`|Every player-day tagged High or Low|
+|2|**Flag climbs**`climb = 1 if day_end_rank < day_start_rank`|Identifies any upward movement (including off-board → board)|
+|3|**Detect next-day return**`LEFT JOIN gamesplayed ON (user_id, active_date+1)`|Adds `return_next_day` (1/0)|
+|4|**Aggregate** counts per tier × climb × return|Table below|
+|5|**Run two-proportion z-test** per tier in Python|z-stats, p-values|
+|6|**Compute effect sizes** (∆ pp, risk-ratio)|Interpretation values|
+
+**SQL snippet (key part)**
+
+```sql
+SELECT
+  CASE WHEN day_start_rank <= 25 THEN 'High' ELSE 'Low' END AS rank_tier,
+  CASE WHEN day_end_rank < day_start_rank THEN 1 ELSE 0 END AS climb,
+  IF(nd.user_id IS NULL, 0, 1)       AS return_next_day,
+  COUNT(*)                           AS n_players
+FROM `project.leaderboard`  l
+LEFT JOIN `project.gamesplayed` nd
+       ON nd.user_id = l.user_id
+      AND nd.active_date = DATE_ADD(l.active_date, INTERVAL 1 DAY)
+GROUP BY 1,2,3;
+```
+
+**Intermediate contingency table**
+
+|rank_tier|climb|return=0|return=1|total|
+|---|---|--:|--:|--:|
+|High|0|33 823|63 546|97 369|
+|High|1|403|1 182|1 585|
+|Low|0|157 328|298 871|456 199|
+|Low|1|395|642|1 037|
+
+**Python test code (abridged)**
+
+```python
+from statsmodels.stats.proportion import proportions_ztest
+# High tier
+count = [1182, 63546]        # returns
+nobs  = [1585,  97369]       # totals
+z, p  = proportions_ztest(count, nobs)
+# Low tier
+count = [642, 298871]
+nobs  = [1037, 456199]
+z2, p2 = proportions_ztest(count, nobs)
+```
+
+|Tier|Return rate if climb|Return rate if no climb|Δ (pp)|Risk ratio|z|p-value|
+|---|---|---|--:|--:|---|---|
+|High (≤ 25)|74.6 %|65.3 %|**+9.3**|**1.14×**|7.73|<1e-13|
+|Low (≥ 26)|61.9 %|65.5 %|**–3.6**|0.94×|-2.44|0.015|
+
+---
+
+## Explanation (plain English)
+
+1. **What the numbers say**
+    
+    - High-rank players who managed any upward move yesterday showed a **9 percentage-point jump** in next-day log-ins—statistically robust and commercially meaningful.
+        
+    - Low-rank players who moved up logged in slightly **less** than their non-climbing peers (–3 pp). The drop is statistically significant but small.
+        
+2. **What we _cannot_ claim**  
+    These findings reveal **correlation**, not causation. A high-rank player may return because they were already highly engaged (and therefore climbed), not because the climb itself motivated them.
+    
+3. **Suggested next steps to test causation**
+    
+    - **Experiment:** show a special “Rank Up!” celebration or reward only to a random half of climbing high-rank players; measure uplift in D1 return.
+        
+    - **Threshold tests:** for low-rankers, try incentives only when the jump crosses a big threshold (e.g., 30 → 20).
+        
+    - **Segment deeper:** split low-rank players by closeness to Top 25; those hovering near the edge may respond differently.
+        
+
+---
+
+_This report demonstrates the analysis path from raw telemetry through SQL extraction, statistical testing in Python, and business interpretation—highlighting where leaderboard climbs align with retention and where they don’t. All code and queries are reproducible; reach out for the full notebooks or dashboard links._
+
+# 2. If a player’s rank drops, is next‑day return worse than for climbers?
+
+```sql
+WITH moves_raw AS (
+
+SELECT
+
+user_id,
+
+active_date,
+
+CASE
+
+WHEN day_end_rank < day_start_rank THEN 'climb'
+
+WHEN day_end_rank > day_start_rank THEN 'drop'
+
+ELSE 'no_change'
+
+END AS move_type -- new name
+
+FROM `bp.stg_user_rank_each_day`
+
+),
+
+  
+
+moves AS (
+
+SELECT *
+
+FROM moves_raw
+
+WHERE move_type IN ('climb', 'drop')
+
+),
+
+  
+
+next_day AS (
+
+SELECT DISTINCT
+
+user_id,
+
+DATE_SUB(active_date, INTERVAL 1 DAY) AS active_date
+
+FROM `bp.stg_user_games_played`
+
+)
+
+  
+
+SELECT
+
+move_type AS movement,
+
+IF(nd.user_id IS NULL, 0, 1) AS return_next_day,
+
+COUNT(*) AS n_players
+
+FROM moves
+
+LEFT JOIN next_day nd USING (user_id, active_date)
+
+GROUP BY movement, return_next_day
+
+ORDER BY movement, return_next_day;
+```
+
+### Quick read-out
+
+- **Return rate after a rank drop (70.6 %) is _not_ lower than after a rank climb (69.6 %).**
+    
+- The difference is +1.0 percentage-point in favour of the droppers, and it is **not statistically significant** (p = 0.23, two-sided z-test).
+    
+- Therefore, with the current data we have **no evidence that losing rank hurts next-day retention.**
+    
+
+---
+
+## From counts to answer
+
+|Movement|Returned next day|Did **not** return|Total|Return rate|
+|---|--:|--:|--:|---|
+|**Climb**|1 824|798|2 622|**69.6 %**|
+|**Drop**|103 791|43 131|146 922|**70.6 %**|
+
+### Two-proportion _z_-test (Python)
+
+```python
+from statsmodels.stats.proportion import proportions_ztest
+
+count = [103_791, 1_824]      # successes: drop, climb
+nobs  = [146_922, 2_622]      # totals
+
+z, p_two = proportions_ztest(count, nobs, alternative='two-sided')
+delta_pp = (count[0]/nobs[0] - count[1]/nobs[1]) * 100      # +1.0 pp
+risk_ratio = (count[0]/nobs[0]) / (count[1]/nobs[1])        # 1.01×
+print(z, p_two, delta_pp, risk_ratio)
+```
+
+**Output**
+
+```
+z = 1.20,  p = 0.23  (two-sided)
+Δ = +1.0 pp,  RR = 1.01
+```
+
+### Interpretation
+
+- p* = 0.23 > 0.05 ⇒ fail to reject the null hypothesis that both groups retain equally.  
+    Δ is **positive**, not negative, so the predefined “drop hurts retention” criterion (negative Δ or RR < 1 with p < 0.05) is **not met**.
+    
+
+---
+
+## What this means (and does _not_ mean)
+
+- **Correlation only**: we simply observe that droppers return just as often.
+    
+- **No causal claim**: dropping might coincide with higher underlying engagement (e.g., highly active players churn through many matches and sometimes slip a place).
+    
+- **Small climber sample**: only ~2.6 k climb rows vs 147 k drop rows; keep watching as more data accumulate.
+    
+
+### Next steps to uncover causation
+
+1. **Run an experiment**: randomly show a “Rank lost” warning to some droppers and observe whether it changes return behaviour.
+    
+2. **Segment further**: split by current rank tier (≤ 25 vs 26 +) or size of the drop—large falls might behave differently.
+    
+3. **Model with covariates**: logistic regression on return_next_day ~ drop + play_time + total_matches to control for baseline activity.
+    
+
+---
+
+_Need the refreshed SQL, Python notebook, or a short slide? Just let me know and I’ll share them._
+
+# 3 

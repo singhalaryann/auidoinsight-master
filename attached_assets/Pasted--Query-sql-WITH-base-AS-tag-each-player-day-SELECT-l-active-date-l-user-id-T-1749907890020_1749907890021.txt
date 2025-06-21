@@ -1,0 +1,322 @@
+
+# Query 
+```sql
+WITH base AS ( -- tag each player-day
+
+SELECT
+
+l.active_date,
+
+l.user_id,
+
+  
+
+/* Treat l.rank as the start-of-day rank.
+
+If you have the dedicated day_start_rank column instead,
+
+replace l.rank with that. */
+
+l.rank AS day_start_rank,
+
+l.rank_delta,
+
+  
+
+-- rank bucket: high ≤ 25 vs. low ≥ 26
+
+CASE WHEN l.rank <= 25 THEN 'high' ELSE 'low' END AS rank_bucket,
+
+  
+
+-- climbed today? rule: positive delta ⇒ better rank
+
+CASE WHEN l.rank_delta > 0 THEN 1 ELSE 0 END AS climbed
+
+FROM `bp.stg_user_rank_each_day` AS l
+
+),
+
+  
+
+next_day AS ( -- did the same user play tomorrow?
+
+SELECT
+
+b.*,
+
+CASE
+
+WHEN EXISTS (
+
+SELECT 1
+
+FROM `bp.stg_user_games_played` p
+
+WHERE p.user_id = b.user_id
+
+AND p.active_date = DATE_ADD(b.active_date, INTERVAL 1 DAY)
+
+)
+
+THEN 1
+
+ELSE 0
+
+END AS played_next_day
+
+FROM base AS b
+
+)
+
+  
+
+-- ▸ This is the dataset you'll export to Python
+
+SELECT
+
+rank_bucket, -- 'high' / 'low'
+
+climbed, -- 0 / 1
+
+played_next_day -- 0 / 1
+
+FROM next_day;
+```
+
+# Q R
+|    | rank_bucket   |   climbed |   played_next_day |   rank_bucket_bin |
+|---:|:--------------|----------:|------------------:|------------------:|
+|  0 | high          |         0 |                 1 |                 1 |
+|  1 | high          |         0 |                 1 |                 1 |
+|  2 | high          |         0 |                 1 |                 1 |
+|  3 | high          |         1 |                 1 |                 1 |
+|  4 | high          |         0 |                 1 |                 1 |
+
+# Python
+```python
+import scipy.stats as stats
+
+import statsmodels.formula.api as smf # for logistic-reg interaction test
+
+  
+
+# --------------------------------------------------------------------------
+
+# 2. Build 2×2 tables *within each bucket* and run χ²
+
+# --------------------------------------------------------------------------
+
+results = []
+
+for bucket in ["high", "low"]:
+
+sub = df_1[df_1.rank_bucket == bucket]
+
+table = pd.crosstab(sub.climbed, sub.played_next_day).loc[[0,1],[0,1]].to_numpy()
+
+chi2, p, *_ = stats.chi2_contingency(table, correction=False)
+
+results.append({"bucket": bucket, "chi2": chi2, "p": p,
+
+"ret_no_gain": table[0,1] / table[0].sum(),
+
+"ret_gain" : table[1,1] / table[1].sum()})
+
+chi_df = pd.DataFrame(results)
+
+print("\nChi-square within each bucket")
+
+print(chi_df)
+
+  
+
+# --------------------------------------------------------------------------
+
+# 3. Logistic-regression with interaction to test
+
+# "Is the *lift* the same in high vs low?"
+
+# --------------------------------------------------------------------------
+
+# Convert columns to regular int type to avoid Int64 dtype issues
+
+df_1["played_next_day"] = df_1["played_next_day"].astype("int32")
+
+df_1["climbed"] = df_1["climbed"].astype("int32")
+
+df_1["rank_bucket_bin"] = (df_1.rank_bucket == "high").astype("int32") # high=1, low=0
+
+  
+
+model = smf.logit("played_next_day ~ climbed + rank_bucket_bin + climbed:rank_bucket_bin", data=df_1).fit(disp=0)
+
+print("\nLogistic regression w/ interaction")
+
+print(model.summary())
+
+  
+
+# key p-values --------------------------------------------------------------
+
+p_high = chi_df.loc[chi_df.bucket=="high","p"].iat[0]
+
+p_low = chi_df.loc[chi_df.bucket=="low" ,"p"].iat[0]
+
+p_int = model.pvalues["climbed:rank_bucket_bin"]
+
+print(f"\nHigh bucket χ²-p = {p_high: .3g}")
+
+print(f"Low bucket χ²-p = {p_low : .3g}")
+
+print(f"Interaction p-value = {p_int: .3g}")
+```
+
+# P R
+```bash
+Chi-square within each bucket
+  bucket         chi2    p  ret_no_gain  ret_gain
+0   high  2326.995947  0.0     0.653566  0.773178
+1    low  1979.215240  0.0     0.560557  0.721006
+
+Logistic regression w/ interaction
+                           Logit Regression Results                           
+==============================================================================
+Dep. Variable:        played_next_day   No. Observations:               333460
+Model:                          Logit   Df Residuals:                   333456
+Method:                           MLE   Df Model:                            3
+Date:                Sun, 08 Jun 2025   Pseudo R-squ.:                 0.02100
+Time:                        20:45:10   Log-Likelihood:            -2.1471e+05
+converged:                       True   LL-Null:                   -2.1932e+05
+Covariance Type:            nonrobust   LLR p-value:                     0.000
+===========================================================================================
+                              coef    std err          z      P>|z|      [0.025      0.975]
+-------------------------------------------------------------------------------------------
+Intercept                   0.2434      0.005     48.176      0.000       0.234       0.253
+climbed                     0.7060      0.016     43.819      0.000       0.674       0.738
+rank_bucket_bin             0.3913      0.008     46.982      0.000       0.375       0.408
+climbed:rank_bucket_bin    -0.1144      0.020     -5.637      0.000      -0.154      -0.075
+===========================================================================================
+
+High bucket   χ²-p =  0
+Low bucket    χ²-p =  0
+Interaction   p-value =  1.73e-08
+```
+
+# Interpretation
+
+### Quick read
+
+  
+
+* **Yes, climbing the leaderboard boosts next-day return in *both* rank bands.**
+
+* **The lift is *larger* for low-rank players (≥ 26) than for high-rank players (≤ 25).**
+
+The difference is not just numerically bigger—it is highly significant (p ≈ 1.7 × 10⁻⁸).
+
+  
+
+---
+
+  
+
+## 1 Bucket-level χ² tests
+
+  
+
+| Rank bucket | Return rate if **no gain** | Return rate if **gain** | Absolute lift | χ² (1 d.f.) | p-value |
+
+| --------------- | -------------------------- | ----------------------- | ------------- | ----------- | -------- |
+
+| **High** (≤ 25) | 65.4 % | **77.3 %** | **+11.9 pp** | 2327 | < 1e-300 |
+
+| **Low** (≥ 26) | 56.1 % | **72.1 %** | **+16.0 pp** | 1979 | < 1e-300 |
+
+  
+
+*Both buckets reject the null of independence ⇒ climbing matters in each segment.*
+
+  
+
+---
+
+  
+
+## 2 Logistic-regression interaction test
+
+  
+
+```
+
+log odds(next-day return)
+
+= 0.243
+
++ 0.706 · climbed
+
++ 0.391 · high_rank
+
+− 0.114 · (climbed × high_rank) p_interaction ≈ 1.7 × 10⁻⁸
+
+```
+
+  
+
+* Baseline (low-rank, no gain) log-odds ≈ 0.24 → **59.7 %** return.
+
+* **+ 0.706** → climbing adds a big boost for low-rank players.
+
+(Exp(0.706) ≈ 2.0 ⇒ roughly doubles their odds of returning.)
+
+* **+ 0.391** → high-rank players are more loyal even without climbing.
+
+* **− 0.114** → the climbing boost is **smaller** for high-rank players.
+
+Odds multiplier drops from 2.0 to exp(0.706 − 0.114) ≈ 1.8.
+
+  
+
+The highly significant negative interaction coefficient confirms that **the incremental effect of climbing is attenuated for players who already sit in the top-25**.
+
+  
+
+---
+
+  
+
+## 3 Practical takeaway
+
+  
+
+| Segment | Baseline next-day return | Extra lift from climbing | New return rate |
+
+| -------------------- | ------------------------ | ------------------------ | --------------- |
+
+| **High-rank** (≤ 25) | 65 % | **+12 pp** | 77 % |
+
+| **Low-rank** (≥ 26) | 60 % | **+16 pp** | 72 % |
+
+  
+
+* **High-rank players are loyal anyway**; climbing still helps but yields a modest +12 pp.
+
+* **Low-rank players are the swing group**; a climb drives a +16 pp jump—\~27 % relative lift.
+
+  
+
+### Product ideas
+
+  
+
+1. **Surface “You climbed!” messages prominently for the mid-tier/low-tier cohort.**
+
+Push notifications or post-match banners could capture this outsized lift.
+
+2. **For top-25 users, focus on other motivators** (e.g., title defenses, rival proximity) since pure rank gain has diminishing marginal impact.
+
+3. **Experiment:** A/B test tailored messaging by bucket to verify causal impact and fine-tune tone/rewards.
+
+  
+
+**Bottom line:** climbing is good for retention everywhere, but it is **most lucrative to encourage rank progression among players outside the top-25**.

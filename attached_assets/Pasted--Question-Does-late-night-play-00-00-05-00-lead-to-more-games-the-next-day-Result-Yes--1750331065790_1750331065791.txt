@@ -1,0 +1,208 @@
+# Question :
+Does late-night play (00:00 – 05:00) lead to more games the next day?
+# Result 
+Yes. 
+
+We fetch the games played by the user
+```sql
+SELECT
+  active_date,
+  user_id,
+  ev.element.event_timestamp AS event_timestamp,
+  ev.element.game_type AS game_type,
+  ev.element.result AS result,
+  ev.element.game_id AS game_id
+FROM `xgcrypt`.`bp`.`data3m`
+CROSS JOIN UNNEST(game_end_v2.list) AS ev
+WHERE ev.element.event_timestamp IS NOT NULL
+  AND ev.element.game_type IS NOT NULL
+```
+
+this is saved as stg_user_games_played
+
+The table looks like this
+
+active_date	user_id	event_timestamp	game_type	result
+2025-03-15	C5qCCbzXocPzDlRoqIWAC3ssixy2	1742052992000000	pvp	lose
+
+Next we segment users by early/late players and fetch games played daily
+
+```sql
+-- returns: active_date │ user_id │ early_player │ num_games_played_that_day
+WITH base AS ( -- pull the raw rows and turn the epoch integer into a TIMESTAMP
+SELECT
+active_date,
+user_id,
+TIMESTAMP_MICROS(event_timestamp) AS ts -- <-- use _SECONDS if needed
+FROM `xgcrypt`.`bp`.`stg_user_games_played`
+WHERE event_timestamp IS NOT NULL
+),
+  
+flagged AS ( -- mark each game that happened between 00:00-04:59
+SELECT
+active_date,
+user_id,
+CASE
+WHEN EXTRACT(HOUR FROM ts) < 5 THEN 1
+ELSE 0
+END AS early_flag
+FROM base
+),
+  
+daily AS ( -- roll everything up per-day per-user
+SELECT
+active_date,
+user_id,
+MAX(early_flag) AS early_player, -- 1 if any early game
+COUNT(*) AS num_games_played_that_day
+FROM flagged
+GROUP BY active_date, user_id
+)
+  
+SELECT *
+FROM daily
+ORDER BY active_date, user_id;
+```
+
+active_date	user_id	early_player	num_games_played_that_day
+2025-01-01	0002k8nBZEMnX143umlsRwrZ4gC2	0	6
+
+
+Now we analyze the data and appropriate two-sample test (Welch t-test if both groups look normal, otherwise Mann-Whitney U).
+
+```python
+import pandas_gbq, scipy.stats as stats, pandas as pd
+import numpy as np
+from colorama import init, Fore, Style
+def t_test(groupA : pd.Series, groupB : pd.Series):
+print(f"{Fore.CYAN}[DEBUG] Starting t-test analysis...{Style.RESET_ALL}")
+print(f"{Fore.CYAN}[DEBUG] Group A size: {len(groupA)}, Group B size: {len(groupB)}{Style.RESET_ALL}")
+  
+# Convert to numpy arrays and handle any potential NaN values
+groupA_np = groupA.to_numpy()
+groupB_np = groupB.to_numpy()
+# Calculate and display means
+mean_A = np.mean(groupA_np)
+mean_B = np.mean(groupB_np)
+print(f"{Fore.CYAN}[DEBUG] Group A mean: {mean_A:.2f}{Style.RESET_ALL}")
+print(f"{Fore.CYAN}[DEBUG] Group B mean: {mean_B:.2f}{Style.RESET_ALL}")
+# normality quick check (optional)
+print(f"{Fore.YELLOW}[INFO] Checking normality of data...{Style.RESET_ALL}")
+if stats.shapiro(groupA_np[:500])[1] > 0.05 and stats.shapiro(groupB_np[:500])[1] > 0.05:
+print(f"{Fore.GREEN}[INFO] Data appears normal, using Welch t-test{Style.RESET_ALL}")
+stat, p = stats.ttest_ind(groupA_np, groupB_np, equal_var=False)
+test = "Welch t-test"
+else:
+print(f"{Fore.GREEN}[INFO] Data appears non-normal, using Mann-Whitney test{Style.RESET_ALL}")
+stat, p = stats.mannwhitneyu(groupA_np, groupB_np, alternative="two-sided")
+test = "Mann-Whitney"
+  
+print(f"{Fore.CYAN}[DEBUG] Test completed successfully{Style.RESET_ALL}")
+return stat, p, test
+def get_groups():
+"""df = pandas_gbq.read_gbq(f
+-- returns: active_date │ user_id │ early_player │ num_games_played_that_day
+WITH base AS ( -- pull the raw rows and turn the epoch integer into a TIMESTAMP
+SELECT
+active_date,
+user_id,
+TIMESTAMP_MICROS(event_timestamp) AS ts -- <-- use _SECONDS if needed
+FROM `xgcrypt`.`bp`.`stg_user_games_played`
+WHERE event_timestamp IS NOT NULL
+),
+  
+flagged AS ( -- mark each game that happened between 00:00-04:59
+SELECT
+active_date,
+user_id,
+CASE
+WHEN EXTRACT(HOUR FROM ts) < 5 THEN 1
+ELSE 0
+END AS early_flag
+FROM base
+),
+  
+daily AS ( -- roll everything up per-day per-user
+SELECT
+active_date,
+user_id,
+MAX(early_flag) AS early_player, -- 1 if any early game
+COUNT(*) AS num_games_played_that_day
+FROM flagged
+GROUP BY active_date, user_id
+)
+  
+SELECT *
+FROM daily
+ORDER BY active_date, user_id;
+, project_id="xgcrypt")
+# Convert num_games_played to numeric type and ensure proper format for statistical testing
+df["num_games_played"] = pd.to_numeric(df["num_games_played"], errors="coerce")
+df.to_csv("df.csv")"""
+df = pd.read_csv("df.csv")
+  
+return (
+df[df["early_player"] == 1]["num_games_played_that_day"].dropna().astype(int),
+df[df["early_player"] == 0]["num_games_played_that_day"].dropna().astype(int)
+)
+  
+if __name__ == "__main__":
+group_1, group_2 = get_groups()
+stat, p, test = t_test(group_1, group_2)
+print(f"{Fore.GREEN}[INFO] Stat: {stat}, P: {p}, Test: {test}{Style.RESET_ALL}")
+```
+# Python Result
+```bash
+Late-night sample size: 1,016,792, mean: 9.18
+Other sample size: 2,988,897, mean: 5.86
+Running Shapiro tests on 500-row subsamples to pick the right test…
+
+Statistical test chosen → Mann-Whitney U
+Statistic value : 1868690874513.0
+P-value         : 0.0
+
+Mean difference (late - other): 3.32 games
+Relative ratio (late / other): 1.57
+```
+# Interpretation
+|Metric|Late-night players (A)|Others (B)|
+|---|---|---|
+|Sample size|1 016 792|2 988 897|
+|Mean games next day|**9.18**|**5.86**|
+**Statistical test you ran**
+- Mann-Whitney U ≈ 1.87 × 10¹²  
+- _p_ ≈ 0 ⇒ reject H₀  
+- Data non-normal → Mann-Whitney appropriate.
+
+**Effect size (Cliff’s Δ)**  
+Δ ≈ **+0.23** (small–medium)
+> Roughly **62 % probability** that a late-night player logs **more** games than a non-late-night player the next day.
+
+**Take-away**
+Players active between midnight and 5 AM average **+3.3 additional games** the following day (≈ 1.6× as many).  
+The uplift is statistically secure, but the effect size remains moderate—valuable but nowhere near the booster gap.
+_Next steps_
+1. **Control for time-zone & lifestyle confounders** (night-owls, weekend vs weekday).
+    
+2. **Model retention** with logistic / survival analysis including late-night flag, prior-day engagement, and player age to probe whether the flag independently predicts stickiness.
+    
+---
+### Why focus on effect size?
+With millions of observations, almost any difference gives a vanishing _p_-value. Cliff’s Δ (or rank-biserial _r_) tells you **how big** the behavioural gap really is:
+||||Typical interpretation|
+|---|---|---|---|
+||**0 – 0.147**|negligible||
+||**0.147 – 0.33**|small||
+||**0.33 – 0.474**|medium||
+||**> 0.474**|large||
+- Booster usage Δ ≈ 0.84 → **huge**
+    
+- Late-night flag Δ ≈ 0.23 → **small–medium**
+    
+Use these numbers when prioritising design or LiveOps experiments.
+### Final recommendations
+- **Report both significance and magnitude** whenever you surface results to stakeholders.
+    
+- **Visualise distributions** (e.g., log-scaled play-time histograms) to spot long tails that can bias means.
+    
+- **Iterate to causal tests** (A/B or interrupted-time-series) before building features around these correlations.

@@ -1,0 +1,34 @@
+We are building the final backend pieces for our Business Snapshot feature. This involves creating two new services for processing data and updating our existing API endpoint and storage layer to perform on-the-fly data fetching from BigQuery.
+
+Please follow these instructions, which are based on our agreed-upon plan.
+
+1.  **Install Dependencies:**
+    *   Add the `@google-cloud/bigquery` package to the project's dependencies.
+
+2.  **Create the BigQuery Service (`server/services/bigquery.ts`):**
+    *   Create a new file for a service that only runs queries.
+    *   Export a single async function: `executeBigQuery(query: string)`.
+    *   This function should initialize the BigQuery client using service account credentials from environment variables (`BQ_PROJECT_ID`, `BQ_PRIVATE_KEY`, `BQ_CLIENT_EMAIL`) and execute the query string it receives. Remember to handle newlines in the private key.
+    *   It should return the raw query results.
+
+3.  **Create the Snapshot Processor Service (`server/services/snapshot_processor.ts`):**
+    *   Create a new file for the service that orchestrates the processing of a single metric.
+    *   Import `executeBigQuery` and the `SnapshotMetric` type.
+    *   Export a primary async function: `processMetric(metric: SnapshotMetric): Promise<any>`.
+    *   Within this file, create a helper function `prepareQuery(metric)` that builds the SQL string.
+        *   It must handle a `date_filter_clause` from `metric.queryParams` by parsing and replacing placeholders like `TODAY` and `1M_AGO` with the correct SQL date functions.
+        *   It must inject the resolved date clause into the `metric.source_query` at the `{{date_filter_clause}}` position.
+        *   It should also handle other non-date placeholders.
+    *   Create a second helper function `transformResult(metric, data)` that formats the raw BigQuery data into the final JSON structure the frontend needs, based on the `metric.metric_type` and `metric.display_config`. It should be able to handle `number`, `number_comparison`, and `chart` types correctly.
+    *   The main `processMetric` function should call `prepareQuery`, then `executeBigQuery`, then `transformResult`, and finally return the processed data payload.
+
+4.  **Update the Storage Layer (`server/storage.ts`):**
+    *   Ensure there is a function named `getSnapshotDefinitionsByTags(tags: string[])` that simply fetches the raw metric and insight definitions from the database based on tags, without limits or processing.
+    *   Delete the `getBusinessSnapshotData` and `updateMetricPayload` functions if they exist.
+
+5.  **Update the API Endpoint (`server/routes.ts`):**
+    *   In the `GET /api/business-snapshot` endpoint handler:
+        *   After getting the user's top tags, call your `getSnapshotDefinitionsByTags` function.
+        *   For the metrics array, use `Promise.all` to concurrently call `processMetric` for each metric definition.
+        *   Create a new array of metric objects to return. Each object should combine the original metric definition with its newly fetched data, under a new key: `{ ...metric, liveData: processedPayload }`.
+        *   Return the final response object containing the processed metrics and the original insights.

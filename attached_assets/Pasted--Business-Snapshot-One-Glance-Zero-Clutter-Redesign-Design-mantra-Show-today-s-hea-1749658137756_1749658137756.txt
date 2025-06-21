@@ -1,0 +1,119 @@
+### “Business Snapshot” — One-Glance, Zero-Clutter Redesign
+
+> **Design mantra:** *“Show today’s health, yesterday’s trend, tomorrow’s risk — in that order.”*
+> Three horizontal bands, each with one job. Nothing competes for the eye.
+
+---
+
+## 1 Health Bar ( ≈ 80 px tall )
+
+| Zone                  | Content                                  | Visual treatment                                       |
+| --------------------- | ---------------------------------------- | ------------------------------------------------------ |
+| **North-star Metric** | **\$ Rev / DAU** (or whatever you track) | 48-px number, bold, brand color.                       |
+| ▲/▼ badge             | +3 % vs last week                        | Up arrow green / down red; tiny text under the number. |
+| Mini sparkline        | 7-day line, no grid, neutral grey        | Aligned flush right so the number reads first.         |
+
+*Why:* Humans look top-left first; put the **one number that matters** there.
+*(Apple’s Weather app uses the same single-number hero trick.)*
+
+---
+
+## 2 Trend Grid ( 2×2 cards; each 240 × 200 px )
+
+```
+┌──────────────┬──────────────┐
+│  Retention   │   ARPDAU     │
+│   30-day     │              │
+│  sparkline   │  sparkline   │
+│  + tooltip   │              │
+└──────────────┴──────────────┘
+┌──────────────┬──────────────┐
+│  Active Payers│   Funnel     │
+│   % of DAU    │  New→Pay      │
+│  w/ delta     │ mini bars    │
+└──────────────┴──────────────┘
+```
+
+**Rules**
+
+* Card title (14 px), metric value (24 px bold), delta pill (+/-).
+* Thin divider, then 80-px tall chart (sparkline or bar).
+* Hover reveals exact numbers; click opens deep-dive page.
+* All charts share an x-axis timeframe ( defaults to “last 30 d” ).
+
+---
+
+## 3 Insight Feed ( bottom, grows vertically )
+
+| Element             | Example                                  | Rationale                                             |
+| ------------------- | ---------------------------------------- | ----------------------------------------------------- |
+| **AI Insight Chip** | “⚡ Spain whales: ARPPU +18 % vs EU avg.” | Short, emoji prefix for category (⚡ growth, 🛑 risk). |
+| Timestamp           | “2 h ago”                                | Grey 11 px right-aligned.                             |
+| Expand ›            | Shows 2–3 sentences + “Go to cohort” CTA | Progressive disclosure keeps feed tidy.               |
+
+*Feed auto-collapses older cards; max five visible.*
+
+---
+
+## Micro-Copy & Tone
+
+* Titles: one noun, no subtitles. **“Retention”** not “Retention Rate Over Time”.
+* Numbers read “42 %” not “0.42”.
+* Deltas always have context: “vs last 7 d”.
+* Empty states: “No insights yet — come back tomorrow.”
+
+---
+
+## Color / Typography Hierarchy
+
+| Level | Usage              | Style                            |
+| ----- | ------------------ | -------------------------------- |
+| **A** | Hero metric        | Brand-blue number 48 / semi-bold |
+| **B** | Card metric values | 24-px, black                     |
+| **C** | Delta pills        | Green ▲ / Red ▼, 12-px           |
+| **D** | Labels, tooltips   | 11-px grey-600                   |
+
+Limit brand color to hero, buttons, and deltas; everything else monochrome for calm focus.
+
+---
+
+## Interaction Flow
+
+1. **PM lands** ➜ sees Hero metric first (1-second rule).
+2. Eye drops to Trend Grid — finds the metric of interest, clicks it.
+3. Deep-dive opens in side panel; snapshot stays visible in background.
+4. Insight Feed draws attention with subtle slide-in animation only when a new card arrives (max once per session).
+
+---
+
+## Quick ASCII Wire
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ $1.27   Rev / DAU    ▲ +3% vs LW       ┈┉┉┉┈┉┈┈         │
+└────────────────────────────────────────────────────────────┘
+┌──────────────┬──────────────┐
+│ Retention    │ ARPDAU       │
+│ 42%  ▲1.2pp  │ $0.37 ▼0.5%  │
+│  ┈┉┈┉┈       │  ┈┉┈┉┈        │
+└──────────────┴──────────────┘
+┌──────────────┬──────────────┐
+│ Paying %     │ Onboard Funnel│
+│ 4.5% ▲0.2pp  │ 85% → 22%    │
+│  ┈┉┈┉┈       │ mini bars     │
+└──────────────┴──────────────┘
+┌──────────────── Insights ────────────────┐
+│ ⚡ Spain whales: ARPPU +18% vs EU avg. ›  │
+│ 🛑 Churn risk rising in Lvl 10 players › │
+└──────────────────────────────────────────┘
+```
+
+---
+
+### Outcome
+
+* **One glance → health.**
+* **Two glances → trend.**
+* **Third glance (if you want) → insight & drill-down.**
+
+That hierarchy keeps the Business Snapshot laser-focused, Jobs-level simple, and instantly useful to any PM.

@@ -1,0 +1,97 @@
+### Why it’s still blowing up
+
+Your rollout helper **hard-codes fall-backs** that overwrite what the wizard supplies:
+
+```ts
+environment || 'prod',            // ← forces prod if empty
+flagKey || `experiment_${id}`,    // okay
+winnerKey || 'variant_b',         // ← forces snake-case key
+```
+
+What’s happening in the failing call:
+
+| Wizard payload              | Value that actually gets used | Problem                                            |
+| --------------------------- | ----------------------------- | -------------------------------------------------- |
+| `environment = "test-avi"`  | **`"prod"`**                  | Flag in prod doesn’t have your new variation keys. |
+| `winnerKey    = "variantB"` | **`"variant_b"`**             | Key no longer matches (`variantB` vs `variant_b`). |
+
+LD looks in **prod** for a variation called **`variant_b`** → not found → 404 / 400 error.
+
+---
+
+## 1  Remove the destructive fall-backs
+
+```diff
+const result = await launchDarklyRollout(
+   ldToken,
+   projectKey,                          // "default"
+-  environment || 'prod',               // BAD: forces prod
+-  flagKey || `experiment_${experimentId}`,
+-  winnerKey || 'variant_b',            // BAD: forces snake-case
++  environment,                         // whatever the wizard sent
++  flagKey,
++  winnerKey,
+   traffic
+);
+```
+
+*If the wizard guarantees non-empty strings you don’t need the `||` guards at all.*
+
+---
+
+## 2  Harden the rollout helper (one time)
+
+Make it resolve by **value OR key** and ignore case / spaces, so small UI typos don’t break again:
+
+```ts
+const winnerVar = flag.variations.find(v =>
+  v.key.toLowerCase() === winnerKey.toLowerCase() ||
+  String(v.value).replace(/\s+/g, "").toLowerCase() ===
+    winnerKey.replace(/\s+/g, "").toLowerCase()
+);
+
+if (!winnerVar) {
+  throw new Error(
+    `Variation '${winnerKey}' not found in flag '${flagKey}'. ` +
+    `Check LaunchDarkly › Flags › ${flagKey} › Variations.`
+  );
+}
+```
+
+---
+
+## 3  Pass the wizard-picked environment
+
+Make sure the front-end sends exactly the env key the PM selected (`test-avi`, `production`, etc.) and that the dropdown is populated straight from `/projects/{proj}` so there’s no typo.
+
+```ts
+fetch('/api/rc-registry/deploy', {
+  method: 'POST',
+  body: JSON.stringify({
+    ...,
+    environment: selectedEnv,    // NOT hard-coded
+    ...
+  })
+});
+```
+
+---
+
+## 4  Retest
+
+1. **Wizard**
+
+   * Provider: LaunchDarkly
+   * Feature: `features.booster.ux`
+   * Environment: `test-avi`
+   * Winner: `variantB`
+2. Click **Ship Now**.
+   *Backend uses `test-avi`, finds variation key `variantB`, turns flag ON.*
+
+Success banner:
+
+```
+Rolled out via LaunchDarkly • flag features.booster.ux v79
+```
+
+Now the flow is environment-safe, variation-key-safe, and you won’t see the “variation key X not found” error again.

@@ -1,0 +1,56 @@
+Below is a **surgical teardown ➜ redesign checklist** for the result card you shared.
+I’ve mapped every tweak to the principles we agreed on (side-by-side comparison, clear deltas, narrative + decision cues, segment drill-downs, etc.).
+
+| Zone                          | What You See Now                                                           | Why It Needs Love                                              | Concrete Fix                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Header bar**                | “Weekend play drives next-day retention +16 pp” with a tiny calendar stamp | 👍 clear insight, but status/date compete with headline        | • Keep the insight as H1.<br>• Tuck date & “Ready” pill into a light-gray sub-header.<br>• Add a tiny ✅ badge if primary metric is significant (tooltip: “95 % conf.”).                                                                                                                                                                                                                                                   |
+| **Insight pills**             | “+27 % Lift” • “1.00e-300 p-value” • “0.14 Δ”                              | Values repeat info from table; scientific notation looks scary | • Show **Δ (+27 %)** in **green** if significant, **gray** if not.<br>• Replace raw p-value with “p < 0.001”.<br>• Move Cohen’s d / Cliff δ to tooltip so it’s there for analysts but hidden for execs.                                                                                                                                                                                                                   |
+| **Key Metrics table**         | Two rows, four columns (Retention %, Abs Δ pp, Rel Δ %)                    | Works, but needs context + color                               | • Rename rows “Control (Weekday-Only)” / “Variant (Weekend Players)”.<br>• Add **N (users)** column so PMs trust the sample size.<br>• Color-code Δ cells: green ↑ for +, red ↓ for –.                                                                                                                                                                                                                                    |
+| **Impact Visualization**      | Two solid blue bars                                                        | Visually duplicates the table, no delta cue                    | • Convert to **side-by-side bars with delta label above** (“+16 pp”).<br>• Or swap for a **line chart** if metric is tracked across test days.                                                                                                                                                                                                                                                                            |
+| **Business Interpretation**   | 5 bullet points (mixed importance)                                         | Reads like a memo, not an exec brief                           | • Distill to three sections:<br>  1. **What happened (1 sentence)** – “Weekend cohort retained **+16 pp** more the next day (significant).”<br>  2. **So what (1 sentence)** – “Weekend engagement is a strong leading indicator for weekday stickiness.”<br>  3. **Now what (1–2 bullets)** – “1) Promote weekend features in Monday pushes. 2) Validate causality with follow-up A/B test controlling for seasonality.” |
+| **Method footnote**           | “2 × 2 χ² on 333 k player-days …”                                          | Great for transparency but heavy                               | • Keep, but collapse behind a **“Statistical details”** disclosure triangle.                                                                                                                                                                                                                                                                                                                                              |
+| **Action row**                | Buttons: SQL Query • Python Script • Statistical Backing                   | Good for reproducibility, but missing product decisions        | • Left-align “View SQL / Python / Stats”.<br>• Right-align a **primary CTA**: **“Create Follow-up Experiment”** or **“Add to Segment Drill-Down”** depending on flow.<br>• If this were an actual A/B test card, swap CTA to **“Roll Out Variant”** / “Keep Control”.                                                                                                                                                     |
+| **Segment / metric switcher** | None                                                                       | PM can’t compare other KPIs or segments inline                 | • Add a compact **tab bar** above the table:<br>  • KPIs: Retention • Sessions/Day • Avg Session Time • Revenue<br>  • Segments dropdown (All Users ▼). Switching animates the same table/chart.                                                                                                                                                                                                                          |
+| **Color & copy polish**       | All blue bars, neutral text                                                | Hard to parse winners/losers                                   | • Use Bombay-Play palette: Control = gray, Variant = brand blue.<br>• Positive deltas: green ✓; negative: red ↓; non-sig: gray “ns”.                                                                                                                                                                                                                                                                                      |
+
+---
+
+### Quick Mock (text-only)
+
+> **Weekend players boost next-day retention +16 pp ✓**
+> *p < 0.001 (N = 333 k player-days)*
+
+| Group                         | N     | Retention % | Δ (pp)    | Δ %       |
+| ----------------------------- | ----- | ----------- | --------- | --------- |
+| **Control – Weekday-Only**    | 198 k | 59.7 %      | –         | –         |
+| **Variant – Weekend Players** | 135 k | **75.8 %**  | **+16.1** | **+27 %** |
+
+```
+      ▲
+80 % ┤           +16 pp
+60 % ┤███   ███
+40 % ┼───┬───
+        C    V
+```
+
+**Take-away**
+Weekend engagement is a strong predictor of weekday stickiness. Promote weekend-specific features in Monday push notifications. Validate causality with a controlled test that adjusts for seasonality.
+
+<details>
+<summary>Statistical details</summary>
+  2×2 χ², p < 1e-3; Cliff’s δ = 0.14 (small). No seasonality controls.
+</details>
+
+\[ View SQL ] \[ Python ] \[ Stats ]  **Create Follow-up Experiment**
+
+---
+
+### Why these changes hit the brief
+
+* **Side-by-side clarity** → instantly shows Control vs Variant.
+* **Color-coded deltas + sig icon** → PM grasps effect direction & confidence in <3 s.
+* **Sample size & CI on demand** → bolsters trust without clutter.
+* **Actionable CTA** → moves user from insight to next step (roll-out or iterate).
+* **Segment/KPI switcher** → aligns with advanced breakdown spec, keeps card uncluttered.
+
+Adopt as many of these tweaks as fit your design system; they’ll turn the card from a stats read-out into a crisp decision tool.

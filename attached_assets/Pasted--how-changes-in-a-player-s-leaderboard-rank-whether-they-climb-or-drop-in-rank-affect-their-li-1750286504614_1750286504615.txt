@@ -1,0 +1,220 @@
+ how changes in a player's leaderboard rank (whether they "climb" or "drop" in rank) affect their likelihood of returning to play the next day
+
+To do so
+
+Fetch the games played by the users
+```sql
+SELECT
+  active_date,
+  user_id,
+  ev.element.event_timestamp AS event_timestamp,
+  ev.element.game_type AS game_type,
+  ev.element.result AS result,
+  ev.element.game_id AS game_id
+FROM `xgcrypt`.`bp`.`data3m`
+CROSS JOIN UNNEST(game_end_v2.list) AS ev
+WHERE ev.element.event_timestamp IS NOT NULL
+  AND ev.element.game_type IS NOT NULL
+```
+
+Saved as stg_user_games_played
+Looks like 
+Row	active_date	user_id	event_timestamp	game_type	result
+1	2025-03-15	C5qCCbzXocPzDlRoqIWAC3ssixy2	1742052992000000	pvp	lose
+
+Fetch a user's rank each day and change
+
+```sql
+WITH raw AS (                       -- unpack every leaderboard event
+  SELECT
+    active_date,
+    user_id,
+    ev.element.rank            AS rank,
+    ev.element.event_timestamp AS ts
+  FROM `xgcrypt`.`bp`.`data3m`
+  CROSS JOIN UNNEST(leaderboard.list) AS ev
+),
+
+daily AS (                          -- grab first & last rank per day
+  SELECT
+    active_date,
+    user_id,
+    ARRAY_AGG(rank ORDER BY ts DESC LIMIT 1)[SAFE_OFFSET(0)] AS rank
+  FROM raw
+  GROUP BY active_date, user_id
+),
+
+filtered AS (
+  SELECT *
+  FROM daily 
+  WHERE rank IS NOT NULL AND rank <> -1
+),
+
+with_delta AS (
+  SELECT
+    *,
+    LAG(rank) OVER (
+      PARTITION BY user_id 
+      ORDER BY SAFE_CAST(active_date AS DATE)
+    ) - rank AS rank_delta
+  FROM filtered
+)
+
+SELECT *
+FROM with_delta
+ORDER BY active_date, user_id
+```
+
+saved as 
+stg_user_rank_each_day
+
+Look like
+active_date	user_id	rank	rank_delta
+2025-03-31	zmb42ZbdY8SDVpWnLhRS9SlbatE2	40	-34
+
+For each player, each day, we find out if they climbed or dropped in their leaderboard rank, if they played next day and their cohort (new/vetern)
+```sql
+WITH min_day AS ( -- first ever active_date per player
+SELECT user_id, MIN(active_date) AS first_day
+FROM `bp.stg_user_games_played`
+GROUP BY user_id
+),
+  
+prep AS (
+SELECT
+l.active_date,
+l.user_id,
+l.rank_delta,
+  
+-- New if within 7 days (inclusive) of first appearance
+CASE
+WHEN DATE_DIFF(l.active_date, m.first_day, DAY) <= 6 THEN 'new'
+ELSE 'veteran'
+END AS cohort,
+  
+CASE
+WHEN l.rank_delta > 0 THEN 'climb'
+WHEN l.rank_delta < 0 THEN 'drop'
+ELSE 'flat'
+END AS direction
+FROM `bp.stg_user_rank_each_day` AS l
+JOIN min_day AS m USING (user_id)
+),
+
+next_day AS (
+SELECT
+p.*,
+CASE
+WHEN EXISTS (
+SELECT 1
+FROM `bp.stg_user_games_played` s
+WHERE s.user_id = p.user_id
+AND s.active_date = DATE_ADD(p.active_date, INTERVAL 1 DAY)
+) THEN 1 ELSE 0
+END AS played_next_day
+FROM prep AS p
+)
+  
+SELECT
+cohort, -- new / veteran
+direction, -- climb / drop
+played_next_day
+FROM next_day
+WHERE direction IN ('climb','drop');
+```
+
+Results look like this
+
+Row	cohort	direction	played_next_day
+1	new	climb	1
+2	veteran	climb	1	
+
+We run logistic regression on this to find if the effect of rank direction (climb/drop) on next-day retention is different for new vs. veteran players.
+
+```python
+# Logistic regression with interaction
+# Convert Int64 columns to regular int64 first
+df_4 = pandas_gbq.read_gbq(query_4, project_id="xgcrypt") 
+df_4['played_next_day'] = df_4['played_next_day'].astype('int64')
+  
+model = smf.logit(
+"played_next_day ~ C(cohort) * C(direction)",
+data=df_4
+).fit()
+print(model.summary())
+  
+# χ² inside each cohort
+for coh in ["new","veteran"]:
+sub = df_4[df_4.cohort==coh]
+tbl = pd.crosstab(sub.direction, sub.played_next_day).loc[["drop","climb"],[0,1]].to_numpy()
+chi2,p,_,_ = stats.chi2_contingency(tbl, correction=False)
+print(f"{coh}: χ²={chi2:.1f}, p={p:.3g}")
+```
+# P R 
+```bash
+Optimization terminated successfully.
+         Current function value: 0.581511
+         Iterations 5
+                           Logit Regression Results                           
+==============================================================================
+Dep. Variable:        played_next_day   No. Observations:               169409
+Model:                          Logit   Df Residuals:                   169405
+Method:                           MLE   Df Model:                            3
+Date:                Sun, 08 Jun 2025   Pseudo R-squ.:                0.002863
+Time:                        21:44:49   Log-Likelihood:                -98513.
+converged:                       True   LL-Null:                       -98796.
+Covariance Type:            nonrobust   LLR p-value:                2.850e-122
+=============================================================================================================
+                                                coef    std err          z      P>|z|      [0.025      0.975]
+-------------------------------------------------------------------------------------------------------------
+Intercept                                     1.4172      0.081     17.572      0.000       1.259       1.575
+C(cohort)[T.veteran]                         -0.2781      0.081     -3.428      0.001      -0.437      -0.119
+C(direction)[T.drop]                         -0.1762      0.106     -1.659      0.097      -0.384       0.032
+C(cohort)[T.veteran]:C(direction)[T.drop]    -0.0792      0.107     -0.742      0.458      -0.289       0.130
+=============================================================================================================
+new: χ²=2.8, p=0.0969
+veteran: χ²=518.9, p=7.33e-115
+```
+# Interpretation
+**How to read the outputs and what they mean**
+  
+  
+  
+### 2 **New** (≤ 7 days) vs **Veteran** sensitivity (Q 5)
+  
+| Cohort | χ² (climb vs drop) | p-value | Significant? | Practical reading |
+| ----------- | ------------------ | ---------- | ------------ | ----------------------------------------------------- |
+| **New** | 2.8 | 0.097 | ✖︎ | Early players don't react strongly to rank direction. |
+| **Veteran** | 518.9 | 7 × 10⁻¹¹⁵ | ✔︎ | Direction has a big impact on seasoned players. |
+  
+Logit confirms:
+  
+* **Main effect** `direction (drop)` ⇒ –18 pp odds (p ≈ 0.10) — weak overall.
+* `cohort (veteran)` is −0.278 (veterans less sticky baseline).
+* **Interaction** not sig. (p ≈ 0.46): statistical power says the *difference in drop penalty* between cohorts is small, but because new-player χ² isn't sig., the practical penalty is concentrated in veterans.
+  
+**Take-away**
+  
+* **First-week users**: rank direction is not a churn driver yet → focus onboarding, not leaderboard nudges.
+* **Veterans**: drops hurt—use notifications, bonus quests, "redeem your rank" missions the moment a veteran falls.
+  
+---
+  
+### Next steps & experiments
+  
+1. **Dynamic nudge thresholds**
+  
+* Top-25: trigger at Δ ≥ 1.
+* 26+: trigger only at Δ ≥ 6 or Δ ≥ 20, depending on volume.
+2. **Veteran anti-drop campaign**
+  
+* A/B: "Come back and reclaim your spot" push vs control.
+3. **On-ramp celebration for new users**
+  
+* Instead of rank-based messaging, highlight first wins or XP badges during week 1; test whether that outperforms rank nudges.
+4. **Dose-response study**
+  
+* Replace three buckets with exact |Δ| to estimate a smooth curve.
+5. **Mode-specific splits**
+  
+* Repeat the magnitude/tier grid per `game_type` to locate the highest-ROI segments.

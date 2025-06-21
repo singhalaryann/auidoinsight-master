@@ -1,0 +1,25 @@
+### **Re-work: Hypothesis Clarity Assist — Smarter Trigger & Validation**
+
+| Item                      | Revised Detail                                                                                                                                                                                                                                                                                                                         |                                                |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| **Trigger**               | On **Next • Variants & Traffic**, backend calls **`POST /ai/hypothesis-score`** regardless of length. Assist modal appears when \*\*`quality_score < 0.80` \*\* *or* any **required component** is missing (see rule set below).                                                                                                       |                                                |
+| **Rule Set (LLM prompt)** | Ask GPT-4o to extract: <br>• **Population** (who) <br>• **Action / Change** (what) <br>• **Metric** (measure) <br>• **Direction** (increase / decrease) <br>• **Timeframe** (D1, week, etc.) <br>Return `{components_found[], quality_score}` where score = (#found ÷ 5).                                                              |                                                |
+| **API Contract**          | **`POST /ai/hypothesis-score`**<br>Req: `{ "text": "<user hypothesis>" }`<br>Resp:  `{ "quality_score": 0-1, "missing": ["Metric","Direction"] }`                                                                                                                                                                                      |                                                |
+| **UI (Modal)**            | Title: **“Let’s sharpen your hypothesis”** <br>Sub: *“Missing pieces: Metric, Direction. Pick a suggested version or refine manually.”* <br>Suggestions list (≤ 3) crafted by GPT-4o <br>✔ **Use Suggestion** → replaces text <br>📝 **Edit Manually** → cursor focus on textarea <br>Skip link: **Keep Original** (bottom-left, gray) |                                                |
+| **Telemetry**             | Log \`{ accepted: true/false, edit\_type: "AI"                                                                                                                                                                                                                                                                                         | "Manual", missing\_components, latency\_ms }\` |
+| **Copy Updates**          | • Tagline stays: *“Clarity creates impact.”* <br>• Skip toast: none <br>• Accept toast: **“Hypothesis refined ✓”**                                                                                                                                                                                                                     |                                                |
+| **Edge Cases**            | • Empty field ⇒ inline error: *“Add a hypothesis to proceed.”* <br>• User rejects & still missing components ⇒ highlight missing phrases in red and disable **Next**.                                                                                                                                                                  |                                                |
+| **Fail-safe**             | If /ai fails > 2 s → dismiss assist, proceed but flag experiment `needs_review=true` for analyst dashboard.                                                                                                                                                                                                                            |                                                |
+
+---
+
+#### **Example Flow**
+
+1. **User types:** “Test new booster mechanic.” (quality = 0.40)
+2. **Modal shows** missing *Metric* & *Direction* and suggests:
+
+   * “Players offered the new booster **will have higher D7 retention** than control.”
+   * “New booster **increases average session length by ≥ 5 %**.”
+3. User ticks first suggestion → textarea updates → Score recalculates (now 0.80) → **Next** enabled.
+
+This logic guarantees the assist appears for *any* underspecified hypothesis, not just those under 30 characters.

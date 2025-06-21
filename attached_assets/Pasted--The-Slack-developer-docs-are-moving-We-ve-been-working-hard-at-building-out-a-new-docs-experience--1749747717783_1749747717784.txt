@@ -1,0 +1,120 @@
+
+The Slack developer docs are moving! We've been working hard at building out a new docs experience at docs.slack.dev — now in beta! You can start using the new docs today, but we'll keep the content on both sites up to date during the transition.
+Learn more
+Creating interactive messages
+Transform your Slack app into a powerful workflow partner by making messages interactive.
+
+In this guide we'll walk through how app interactivity applies to messages and show you how to build a Slack app capable of interacting with users via message.
+
+App interactivity in messages 
+Beyond creating rich message layouts, Block Kit also contains a subset of components that enable interactivity.
+
+These interactive components can be inserted into messages, converting them from mere information relays into powerful partners for users.
+
+Where once your Slack app might have just pulled in data from external services, interactivity allows your app to manipulate, update, and send back data to that same service, thanks to user action.
+
+Getting started with interactive messages 
+For this guide, you'll need to have created a Slack app, though you won't need to have built it out with any features yet.
+
+When you're ready, it's time to get started.
+
+1. Compose your interactive message 
+Adding interactive components is no different from adding any other block. Let's add a couple of buttons to an actions block in a message payload:
+
+Copy
+{
+  "channel": "C123ABC456",
+  "text": "New Paid Time Off request from Fred Enriquez",
+  "blocks": [
+    {
+      "type": "header",
+      "text": {
+      "type": "plain_text",
+        "text": "New request",
+        "emoji": true
+      }
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*Type:*\nPaid Time Off"
+        },
+        {
+          "type": "mrkdwn",
+          "text": "*Created by:*\n<example.com|Fred Enriquez>"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "fields": [
+        {
+          "type": "mrkdwn",
+          "text": "*When:*\nAug 10 - Aug 13"
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "emoji": true,
+            "text": "Approve"
+          },
+          "style": "primary",
+          "value": "click_me_123"
+        },
+        {
+          "type": "button",
+          "text": {
+            "type": "plain_text",
+            "emoji": true,
+            "text": "Reject"
+          },
+            "style": "danger",
+            "value": "click_me_123"
+        }
+      ]
+    }
+  ]
+}
+Preview
+
+You could replace these buttons with any of the available interactive components. You can also add a button as a section block's accessory element, rather than the actions block used above.
+
+Browse the interactive components to see a full list of what's available, or try the Block Kit Builder tool to visually prototype a layout with interactive components.
+
+2. Publishing an interactive message 
+There's nothing special about the process of an app publishing an interactive message, compared to a regular message. Read our guide to sending messages to find the best publishing method for your app.
+
+After you've chosen a sending method, try to send the message payload above, substituting a real channel ID.
+
+Once you do, your app's message will be sitting in channel, waiting for someone to click the button within. Let's see what happens when they do.
+
+3. Prepare your app to receive interaction payloads 
+When someone uses an interactive component published by your app, Slack will send an interaction payload to you.
+
+An interaction payload is both a way of notifying your app about an interaction, and a bundle of info describing the where and when (and many other Ws) of the interaction. It is vital to the interaction process, so your app has to be able to understand it.
+
+The payload will be sent to your configured Request URL in an HTTP POST. The body of that request will contain a payload parameter. Your app should parse this payload parameter as JSON.
+
+The entirety of this payload will contain all the contextual info that your app needs to be able to figure out what kind of interaction occurred. Your app can use as much or as little of the info as needed.
+
+For the purposes of this guide, you should grab the channel object, and store that channel's id for later. You'll also want to grab the response_url here too.
+
+Now that your app can receive and understand interaction payloads, it needs to decide what it will do after one of them is sent.
+
+4. Respond to the interaction 
+In our guide to handling user interaction we explained the different app responses to any interaction.
+
+The most important is the required acknowledgment response. This response is sent back to the same HTTP POST that delivered the interaction payload.
+
+In addition to this acknowledgment, your app can also choose to compose a message response, invoke a modal, or one of a multitude of asynchronous responses.
+
+Next steps 
+Through this guide you've learned how to add interactive components to messages, prepared your app to handle payloads, and created a simplified interactive flow. From here you can dive into our reference guides to learn more about the different types of blocks you can use, and deepen what your app is capable of doing for users.

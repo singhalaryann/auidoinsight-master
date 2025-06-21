@@ -1,0 +1,145 @@
+# Analysis: Player Sensitivity to Rank Changes (New vs. Veteran)
+
+## 1. Objective
+The goal of this analysis is to determine if new players (in their first 7 days) and veteran players react differently to climbing or dropping on the leaderboard. Specifically, we want to know if the effect of rank changes on next-day retention is the same for both groups.
+
+## 2. Methodology
+To answer this, we will use a combination of statistical tests:
+*   **Chi-squared (χ²) Test:** This will be applied independently to the new and veteran player groups to see if there is a significant relationship between rank direction (climb vs. drop) and next-day retention within each cohort.
+*   **Logistic Regression with an Interaction Term:** This model will formally test if the *effect* of dropping in rank on retention is significantly *different* between new and veteran players. The interaction term (`C(cohort) * C(direction)`) is key to measuring this differential effect.
+
+**Hypotheses:**
+*   **Null Hypothesis (H0):** The effect of rank direction on next-day retention is the same for new and veteran players.
+*   **Alternative Hypothesis (H1):** The effect of rank direction on next-day retention is different for new and veteran players.
+
+## 3. Data Preparation
+The first step is to create a dataset that flags each player-day as belonging to a 'new' or 'veteran' player, notes the rank change direction, and records whether the player returned the next day.
+
+### SQL Query
+The following query was used to construct the dataset for analysis:
+```sql
+WITH min_day AS (
+  -- Step 1: Find the first-ever active date for each player
+  SELECT
+    user_id,
+    MIN(active_date) AS first_day
+  FROM `bp.stg_user_games_played`
+  GROUP BY user_id
+),
+prep AS (
+  -- Step 2: Join the first-day data and classify each player-day
+  SELECT
+    l.active_date,
+    l.user_id,
+    l.rank_delta,
+    -- Cohort: 'new' if within the first 7 days, otherwise 'veteran'
+    CASE
+      WHEN DATE_DIFF(l.active_date, m.first_day, DAY) <= 6 THEN 'new'
+      ELSE 'veteran'
+    END AS cohort,
+    -- Direction of rank change
+    CASE
+      WHEN l.rank_delta > 0 THEN 'climb'
+      WHEN l.rank_delta < 0 THEN 'drop'
+      ELSE 'flat'
+    END AS direction
+  FROM `bp.stg_user_rank_each_day` AS l
+  JOIN min_day AS m USING (user_id)
+),
+next_day AS (
+  -- Step 3: Determine if the player was active on the following day
+  SELECT
+    p.*,
+    CASE
+      WHEN EXISTS (
+        SELECT 1
+        FROM `bp.stg_user_games_played` s
+        WHERE s.user_id = p.user_id
+        AND s.active_date = DATE_ADD(p.active_date, INTERVAL 1 DAY)
+      ) THEN 1 ELSE 0
+    END AS played_next_day
+  FROM prep AS p
+)
+-- Final Output: The modeling dataset
+SELECT
+  cohort,          -- 'new' or 'veteran'
+  direction,       -- 'climb' or 'drop'
+  played_next_day  -- 1 if they returned, 0 if they did not
+FROM next_day
+WHERE direction IN ('climb','drop');
+```
+
+### Data Preview
+A preview of the final table passed to the Python script for analysis:
+|    | cohort  | direction | played_next_day |
+|---:|:--------|:----------|------------------:|
+|  0 | new     | climb     | 1                 |
+|  1 | veteran | drop      | 0                 |
+|  2 | veteran | climb     | 1                 |
+|  3 | new     | drop      | 1                 |
+|  4 | veteran | drop      | 0                 |
+
+
+## 4. Analysis
+The dataset was loaded into a Python script to perform the logistic regression and Chi-squared tests.
+
+### Python Script
+```python
+# Logistic regression with interaction
+df_4['played_next_day'] = df_4['played_next_day'].astype('int64')
+
+# Fit the logistic regression model with an interaction term
+model = smf.logit(
+  "played_next_day ~ C(cohort) * C(direction)",
+  data=df_4
+).fit()
+print("--- Logistic Regression Summary ---")
+print(model.summary())
+
+# Perform Chi-squared tests within each cohort
+print("\n--- Chi-squared Test Results per Cohort ---")
+for coh in ["new", "veteran"]:
+  sub = df_4[df_4.cohort == coh]
+  tbl = pd.crosstab(sub.direction, sub.played_next_day).loc[["drop", "climb"], [0, 1]].to_numpy()
+  chi2, p, _, _ = stats.chi2_contingency(tbl, correction=False)
+  print(f"{coh}: χ²={chi2:.1f}, p={p:.3g}")
+```
+
+## 5. Results
+The script produced the following results:
+
+### Logistic Regression Output
+```
+                           Logit Regression Results
+==============================================================================
+Dep. Variable:        played_next_day   No. Observations:               169409
+Model:                          Logit   Df Residuals:                   169405
+Method:                           MLE   Df Model:                            3
+Covariance Type:            nonrobust   LLR p-value:                2.850e-122
+=============================================================================================================
+                                                coef    std err          z      P>|z|      [0.025      0.975]
+-------------------------------------------------------------------------------------------------------------
+Intercept                                     1.4172      0.081     17.572      0.000       1.259       1.575
+C(cohort)[T.veteran]                         -0.2781      0.081     -3.428      0.001      -0.437      -0.119
+C(direction)[T.drop]                         -0.1762      0.106     -1.659      0.097      -0.384       0.032
+C(cohort)[T.veteran]:C(direction)[T.drop]    -0.0792      0.107     -0.742      0.458      -0.289       0.130
+=============================================================================================================
+```
+
+### Chi-squared Test Output
+```
+new: χ²=2.8, p=0.0969
+veteran: χ²=518.9, p=7.33e-115
+```
+
+## 6. Interpretation & Conclusion
+The results from the two tests provide a clear picture:
+
+1.  **New Players (First 7 Days):** The Chi-squared test resulted in a p-value of **0.097**. As this is greater than the standard 0.05 significance level, we **cannot conclude** that there is a significant relationship between climbing/dropping and returning the next day for this group. Their retention seems unaffected by rank changes.
+
+2.  **Veteran Players:** The Chi-squared test yielded a p-value that is effectively zero (`7.33e-115`). This indicates a **very strong, statistically significant relationship**. For veterans, dropping in rank is clearly associated with lower next-day retention compared to climbing.
+
+3.  **Interaction Effect:** The logistic regression model's interaction term (`C(cohort)[T.veteran]:C(direction)[T.drop]`) has a p-value of **0.458**. This is not significant, which means we cannot statistically prove that the *size* of the "drop penalty" is different between new and veteran players. However, when combined with the Chi-squared results, the practical conclusion is that the penalty is almost entirely concentrated within the veteran group, as there is no significant penalty in the new player group to begin with.
+
+**Final Conclusion:**
+Veteran players are highly sensitive to rank drops, which significantly hurts their next-day retention. New players, however, are largely indifferent to rank changes. This suggests that retention strategies should be tailored differently for each cohort: focus on onboarding and core gameplay for new players, and introduce rank-protection or "comeback" mechanics for veterans who drop. 

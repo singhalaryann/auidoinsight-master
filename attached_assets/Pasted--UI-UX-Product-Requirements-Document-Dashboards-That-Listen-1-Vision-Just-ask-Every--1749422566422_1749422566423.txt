@@ -1,0 +1,108 @@
+# UI/UX Product Requirements Document — “Dashboards That Listen”
+
+## 1. Vision
+
+*“Just ask.”* Every question reveals user intent and instantly reshapes the analytics experience—no menus, no filters, only answers.
+
+## 2. Goals & Non‑Goals
+
+### Goals
+
+1. Deliver **role‑tuned dashboards** on first interaction.
+2. Reduce **clicks‑to‑insight by 80 %** for pilot users.
+3. Adapt dashboard & newsletter weighting continuously (< 1 minute latency).
+
+### Non‑Goals
+
+* Building a full BI tool; we layer on existing data sources.
+* Manual widget builders; focus is automation.
+
+## 3. Success Metrics
+
+| KPI                                       | Target           |
+| ----------------------------------------- | ---------------- |
+| Avg. clicks from question to answer       | ↓ 80 %           |
+| Weekly active dashboard users             | +35 %            |
+| “Highly relevant insight” rating (survey) | 75 %             |
+| Time spent in settings pages              | < 5 % of session |
+
+## 4. Personas
+
+| Persona           | Pain Today                                             | Desired Outcome                             |
+| ----------------- | ------------------------------------------------------ | ------------------------------------------- |
+| **Retention PM**  | Digs through funnels & SQL                             | See churn cohorts instantly                 |
+| **Engagement PM** | Struggles to keep dashboards relevant as features ship | Auto‑updated engagement views               |
+| **Exec**          | Overwhelmed by dozens of charts                        | One newsletter focusing on what matters now |
+
+## 5. Key User Stories
+
+1. **Ask & See** — “As a PM, when I type or speak a question, the main dashboard reorders to show the most relevant charts within 2 s.”
+2. **Newsletter Shift** — “As my question mix changes over a week, the insight digest I receive on Monday adapts its section order automatically.”
+3. **Zero Setup** — “As a new user, I can get a bespoke view without configuring any filters.”
+
+## 6. Functional Requirements
+
+### FR‑1 Universal Listener
+
+* Capture questions from: in‑app search bar, Slack bot, voice command (beta).
+* Store timestamp, user ID, raw text.
+
+### FR‑2 Intent Engine
+
+* Classify each question into ≥ 1 of 7 pillars (Engagement, Retention, Monetization, Store, UA, Tech Health, Social).
+* Confidence ≥ 0.8; fallback to generic view.
+
+### FR‑3 Dynamic Dashboard Composer
+
+* Rank pillars per user (exponential decay over 14 days).
+* Re‑order dashboard tabs, modules, and default filters on load.
+
+### FR‑4 Personalized Insight Newsletter
+
+* Weekly email assembled via template slots weighted by top 3 pillars.
+* Minimum 1 chart / pillar; max 6 total.
+
+### FR‑5 Continuous Adaptation
+
+* On every new question, recalc scores and write to user\_profile table.
+* Front‑end reads profile on each session start; background websocket pushes mid‑session updates.
+
+## 7. UX Principles
+
+1. **Zero‑friction** first mile: blank dashboard fades into view that “snaps” into shape after first question.
+2. **Delight over clutter**: animate re‑ordering (200 ms ease‑in‑out).
+3. **Explainability**: subtle tooltip “Why am I seeing this?” linking to last 3 questions that shaped it.
+
+## 8. User Flow (Happy Path)
+
+Landing → Ask Question → Intent Engine → Dashboard Morph → (Optional) Save View → End Session → Monday Newsletter
+
+## 9. Edge Cases
+
+* No classified intent → fallback “Explorer” view + nudge to ask another question.
+* Conflicting intents (equal weight) → split‑view layout, ask user “Focus on X or Y?”
+
+## 10. Technical Notes
+
+* Front‑end: React + D3; WebSocket for live morphs.
+* Back‑end: Python FastAPI; embeddings via OpenAI; Redis stream for event pipeline.
+
+## 11. Analytics & Logging
+
+* Log NPS after first 7 days.
+* Instrument chart reorder timing and error events.
+
+## 12. Open Questions & Risks
+
+* Voice accuracy in noisy offices.
+* Over‑personalization hiding critical metrics.
+
+## 13. Milestones
+
+| Date    | Deliverable                      |
+| ------- | -------------------------------- |
+| Week 0  | Requirements freeze              |
+| Week 2  | Listener MVP + intent classifier |
+| Week 5  | Dynamic dashboard morph          |
+| Week 8  | Newsletter engine                |
+| Week 10 | Pilot complete & metrics review  |

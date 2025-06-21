@@ -1,0 +1,53 @@
+### What’s Missing & How to Fix It — **“New Experiment” Flow**
+
+Below is a **surgical change-list** that turns the bare-bones modal you showed into the full, no-code wizard we specced earlier.
+For every UI element I give (a) the *component change*, (b) the *exact Steve-Jobs-style copy*, and (c) a quick *design cue* so the team knows what to tweak in Figma.
+
+---
+
+| #      | Component (current)                    | Change                                                                                                             | New Copy                                                                                                         | Design Cue                                                                  |
+| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| **1**  | Modal title<br>“Create New Experiment” | Rename to step-based wizard header: **“1 · Name & Objective”**                                                     | N/A                                                                                                              | Replace single modal with 5-step `Stepper` across top (1–5 dots or labels). |
+| **2**  | *Experiment Name* field                | Keep, but add helper text                                                                                          | Placeholder → `e.g. “Onboarding Flow Test”`<br>Helper (below field, 11 pt gray): *“Choose a clear, human name.”* | Align left, helper fades on focus.                                          |
+| **3**  | — (missing “Hypothesis”)               | **Add multiline field** right under Name                                                                           | Label **Hypothesis**<br>Placeholder: `Hypothesis: New tutorial will lift D7 retention.`                          | 3-line textarea, auto-grow.                                                 |
+| **4**  | Section **Primary Metric**             | Move to Step 4 (Metrics)                                                                                           | See row 13                                                                                                       | In Step 1 keep only Name & Hypothesis.                                      |
+| **5**  | Section **Duration (Days)**            | Also move to Step 4                                                                                                | See row 15                                                                                                       | —                                                                           |
+| **6**  | **Next button**                        | Label: **“Next • Variants”**                                                                                       | Button text exactly as shown                                                                                     | Right-aligned.                                                              |
+| **7**  | — (no Variants step)                   | **Step 2 · Variants & Traffic**                                                                                    | Header: **“2 · Variants & Traffic”**                                                                             |                                                                             |
+| **8**  | —                                      | Two variant cards<br>• **Control (A)** – fixed label<br>• **Variant B** – editable title                           | Card title placeholders:<br>`Control`  `Variant B`                                                               | Use stacked card UI with light border.                                      |
+| **9**  | —                                      | **Add “Add Variant” ghost button**                                                                                 | `+ Add Variant`                                                                                                  | Max 4 variants.                                                             |
+| **10** | —                                      | **Traffic Split slider** (dual-handle) + live pie preview                                                          | Slider label: *“How do you want to split traffic?”*                                                              | Pie auto-updates, 2 sides use variant colours.                              |
+| **11** | **Next button**                        | Label: **“Next • Audience”**                                                                                       | —                                                                                                                | —                                                                           |
+| **12** | — (no Cohort selection)                | **Step 3 · Audience**                                                                                              | Header: **“3 · Audience”**                                                                                       |                                                                             |
+|        |                                        | Add radio group:<br>• **All users** (default)<br>• **Pick Cohort** (dropdown)<br>• **Upload CSV** (button)         | Upload button: **Upload CSV**<br>Helper: *“One user\_id per line.”*                                              | If CSV chosen, open overlay modal (reuse cohort wizard).                    |
+| **13** | —                                      | **Step 4 · Metrics & Duration**                                                                                    | Header: **“4 · Metrics & Duration”**                                                                             |                                                                             |
+|        |                                        | • **Primary Metric** (single-select dropdown)<br>Placeholder: *“Select primary metric”*                            | Dropdown search placeholder: `Search metrics…`                                                                   | Pre-populate popular KPIs.                                                  |
+|        |                                        | • **Secondary Metrics** (multi-select pills)<br>Label: **Secondary Metrics (optional)**                            | Placeholder: `Add secondary metrics`                                                                             | Chips show on select.                                                       |
+|        |                                        | • **Duration** numeric (default 7)                                                                                 | Label: **Run for**<br>Suffix inside field: `days`                                                                | Width ≤ 100 px.                                                             |
+|        |                                        | • **Observation Window** dropdown                                                                                  | Label: **Long-term observation**<br>Options: `None · 2 wk · 4 wk`                                                | Info-icon tooltip: *“Needed for D30 retention.”*                            |
+| **14** | —                                      | **Next button** → **“Review & Start”**                                                                             | —                                                                                                                | —                                                                           |
+| **15** | —                                      | **Step 5 · Review & Launch**                                                                                       | Header: **“5 · Review & Launch”**                                                                                |                                                                             |
+|        |                                        | Summary bullets:<br>• Name<br>• Hypothesis<br>• Variants & traffic<br>• Audience<br>• Metrics<br>• Duration/Window | Section title copy: **“Quick recap before we fly.”**                                                             | Use 14 pt semibold headings.                                                |
+|        |                                        | CTA: **Start Experiment**                                                                                          | Sub-copy under CTA (10 pt gray): *“You can pause anytime.”*                                                      | CTA full-width on mobile, right-align on desktop.                           |
+| **16** | **Cancel** button                      | Persist across steps; rename to **Back** except on step 1                                                          | Copy stays “Cancel” on Step 1 only                                                                               | Disable inline loaders until backend returns 200.                           |
+| **17** | Empty-state card text                  | Replace with Jobs-grade copy                                                                                       | Heading: **No experiments yet** → keep.<br>Body: *“Create your first test and watch insight appear.”*            | Centered; icon stays.                                                       |
+
+---
+
+#### Tiny Copy Tweaks Elsewhere
+
+* **Sidebar Experiments Tab** → Tooltip on hover: *“Design, run, and roll out tests.”*
+* **Counters** (Draft, Planning, etc.) → Ensure “Planning” ≙ “Queued” copy we defined earlier, or rename to keep one term.
+* **Create Experiment** button (top right) → **New Experiment** (matches inventory).
+
+---
+
+### Figma Handoff Checklist
+
+1. Duplicate current modal → convert to 5-step `Stepper`.
+2. Add traffic-split slider component (use existing token blue/gray colours).
+3. Build cohort-upload overlay (file-drop area + progress bar).
+4. Update strings from table exactly; export to JSON for i18n.
+5. Push updated components to design library so Insights & Slack surfaces can pull identical copy.
+
+Let me know once the design team plugs this in—next we can QA micro-interactions and empty-state animations.

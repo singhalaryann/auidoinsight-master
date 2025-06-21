@@ -1,0 +1,74 @@
+import os
+from google.cloud import bigquery
+from statsmodels.stats.proportion import proportions_ztest
+
+# Initialize the BigQuery client
+client = bigquery.Client()
+
+# Define your query to get the counts for heavy and light users
+query = \"\"\"
+WITH user_groups AS (
+  SELECT
+    CASE
+      WHEN daily_total_boosters >= 10 THEN 'heavy'
+      ELSE 'light'
+    END AS user_group,
+    active_next_day
+  FROM
+    `xgcrypt.bp.next_day_retention_bstr_usage`
+)
+SELECT
+  user_group,
+  COUNTIF(active_next_day IS TRUE) AS retained_count,
+  COUNT(*) AS total_count
+FROM
+  user_groups
+GROUP BY
+  user_group
+\"\"\"
+
+# Run the query
+query_job = client.query(query)
+results = query_job.result()
+
+# Process the results
+counts = {}
+for row in results:
+    counts[row['user_group']] = {
+        'retained': row['retained_count'],
+        'total': row['total_count']
+    }
+
+heavy_retained = counts.get('heavy', {}).get('retained', 0)
+heavy_total = counts.get('heavy', {}).get('total', 0)
+light_retained = counts.get('light', {}).get('retained', 0)
+light_total = counts.get('light', {}).get('total', 0)
+
+# Perform the two-proportion z-test
+stat, p_value = proportions_ztest(
+    count=[heavy_retained, light_retained],
+    nobs=[heavy_total, light_total],
+    alternative='larger'
+)
+
+print("Two-proportion z-test results:")
+print(f"Z-statistic: {stat}")
+print(f"P-value: {p_value}")
+
+# Interpretation of the results
+alpha = 0.05
+if p_value < alpha:
+    print("The null hypothesis is rejected. Heavy booster usage is associated with a higher next-day retention rate.")
+else:
+    print("The null hypothesis cannot be rejected. There is not enough evidence to say that heavy booster usage improves next-day retention.")
+
+print(f"\\nHeavy users (>= 10 boosters/day): {heavy_retained} retained out of {heavy_total}")
+print(f"Light users (< 10 boosters/day): {light_retained} retained out of {light_total}")
+
+if heavy_total > 0:
+    heavy_retention_rate = (heavy_retained / heavy_total) * 100
+    print(f"Heavy user retention rate: {heavy_retention_rate:.2f}%")
+
+if light_total > 0:
+    light_retention_rate = (light_retained / light_total) * 100
+    print(f"Light user retention rate: {light_retention_rate:.2f}%")
