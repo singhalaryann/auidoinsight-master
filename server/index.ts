@@ -38,15 +38,21 @@ app.post("/api/signup", async (req, res) => {
     });
 
     // Tell Oso about the new user role
-    // await oso.tell("has_role", 
+    // await oso.tell(
+    //   "has_role", 
     //   { type: "NewUser", id: createdUser.id.toString() },
     //   "org_owner",
     //   { type: "Organization", id: createdOrg.id.toString() }
     // );
 
-
     log(`Success: User ${createdUser.email} created for org ${orgName}. Oso Cloud told.`);
-    res.status(201).send({ userId: createdUser.id, orgId: createdOrg.id });
+    res.status(201).send({ 
+      userId: createdUser.id, 
+      orgId: createdOrg.id,
+      orgName: createdOrg.name,
+      email: createdUser.email,
+      role: "org_owner"
+    });
   } catch (error) {
     console.error("Signup failed:", error);
     res.status(500).send({ message: "Internal server error" });
@@ -91,6 +97,7 @@ app.post("/api/login", async (req, res) => {
       orgId: organization.id,
       orgName: organization.name,
       email: user.email,
+      role: userOrgLink.role,
     });
 
   } catch (error) {
@@ -112,6 +119,69 @@ app.get("/api/projects/:orgId", async (req, res) => {
   } catch (error) {
     console.error("Failed to fetch projects:", error);
     res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+app.put("/api/projects/:projectId", async (req, res) => {
+  const { projectId } = req.params;
+  const { name, userId } = req.body;
+
+  if (!name || !userId) {
+    return res.status(400).send({ message: "Project name and userId are required" });
+  }
+  
+  try {
+    const project = await db.query.projects.findFirst({ where: eq(projects.id, Number(projectId)) });
+    if (!project) {
+      return res.status(404).send({ message: "Project not found" });
+    }
+
+    // Authorize this action with Oso
+    await oso.authorize(
+      { type: "NewUser", id: userId.toString() },
+      "project:edit",
+      { type: "Organization", id: project.orgId.toString() }
+    );
+
+    const [updatedProject] = await db.update(projects)
+      .set({ name })
+      .where(eq(projects.id, Number(projectId)))
+      .returning();
+
+    res.status(200).send(updatedProject);
+  } catch (error) {
+    console.error("Failed to update project:", error);
+    res.status(403).send({ message: "Forbidden or server error." });
+  }
+});
+
+app.delete("/api/projects/:projectId", async (req, res) => {
+  const { projectId } = req.params;
+  const { userId } = req.body;
+
+  if (!userId) {
+    return res.status(400).send({ message: "userId is required" });
+  }
+
+  try {
+    const project = await db.query.projects.findFirst({ where: eq(projects.id, Number(projectId)) });
+    if (!project) {
+      return res.status(404).send({ message: "Project not found" });
+    }
+
+    // Authorize this action with Oso
+    await oso.authorize(
+      { type: "NewUser", id: userId.toString() },
+      "project:delete",
+      { type: "Organization", id: project.orgId.toString() }
+    );
+
+    await db.delete(projects).where(eq(projects.id, Number(projectId)));
+
+    res.status(204).send();
+  } catch (error) {
+    console.error("Failed to delete project:", error);
+    res.status(403).send({ message: "Forbidden or server error." });
   }
 });
 
@@ -150,15 +220,6 @@ server.listen(PORT, async () => {
   log(`Server listening on port ${PORT}`);
   log("Oso Cloud authorization is ready!");
 
-
-
-
-
-
-
-
-
-
   if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
     log("Vite dev server setup complete - serving React frontend");
@@ -167,5 +228,3 @@ server.listen(PORT, async () => {
     log("Serving static frontend files");
   }
 });
-
-//
