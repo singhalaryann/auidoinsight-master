@@ -1,43 +1,32 @@
-import React from "react";
-import { Switch, Route } from "wouter";
-import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
+import { SignupPage } from "./pages/signup";
 import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
-import Navigation from "@/components/Navigation";
-import Dashboard from "@/pages/dashboard";
-import ExperimentsPage from "@/pages/experiments";
-import BusinessSnapshot from "@/pages/business-snapshot";
-import Connect from "@/pages/connect";
-import RemoteConfig from "@/pages/remote-config";
-import NotFound from "@/pages/not-found";
+import { buttonVariants } from "@/components/ui/button";
 
-function Router() {
+// A placeholder for the dashboard you'll build in the next steps.
+function DashboardPage() {
   return (
-    <Switch>
-      <Route path="/" component={Dashboard} />
-      <Route path="/experiments" component={ExperimentsPage} />
-      <Route path="/business-snapshot" component={BusinessSnapshot} />
-      <Route path="/connect" component={Connect} />
-      <Route path="/remote-config" component={RemoteConfig} />
-      <Route component={NotFound} />
-    </Switch>
+    <div className="p-8">
+      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <p>Welcome! You have successfully signed up or logged in.</p>
+      <Link to="/" className={buttonVariants({ variant: "link", className: "mt-4" })}>
+        Back to Home
+      </Link>
+    </div>
   );
 }
 
 function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <div className="min-h-screen bg-background">
-          <Navigation />
-          <main className="container mx-auto px-4 py-6">
-            <Router />
-          </main>
-        </div>
-      </TooltipProvider>
-    </QueryClientProvider>
+    <>
+      <Router>
+        <Routes>
+          <Route path="/" element={<SignupPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
+        </Routes>
+      </Router>
+      <Toaster />
+    </>
   );
 }
 

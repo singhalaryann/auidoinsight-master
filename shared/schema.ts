@@ -1,7 +1,8 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb, doublePrecision } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, doublePrecision, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// === EXISTING TABLES (Keep as-is) ===
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
@@ -64,9 +65,11 @@ export const analysisResults = pgTable("analysis_results", {
   
   // Technical Appendix
   sqlQuery: text("sql_query"),
+  sqlQueries: jsonb("sql_queries"), // Add this missing column
   queryResult: jsonb("query_result"),
   pythonScript: text("python_script"),
   pythonOutput: text("python_output"),
+  chartDescription: text("chart_description"), // Add this missing column
   tests: jsonb("tests"), // Dynamic array of statistical tests with flexible parameters
   
   // Metadata
@@ -162,7 +165,44 @@ export const snapshotInsights = pgTable("snapshot_insights", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
-// Zod schemas
+// === NEW TABLES FOR PART 1 (Organizations, Projects, Users with Permissions) ===
+export const organizations = pgTable("organizations", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const projects = pgTable("projects", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  orgId: integer("org_id").notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const newUsers = pgTable("new_users", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  name: text("name"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const usersToOrganizations = pgTable("users_to_organizations", {
+  userId: integer("user_id").notNull().references(() => newUsers.id, { onDelete: 'cascade' }),
+  orgId: integer("org_id").notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+  role: text("role").notNull().default("member"), // e.g., 'org_owner', 'billing_admin', 'member'
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.orgId] }),
+}));
+
+export const usersToProjects = pgTable("users_to_projects", {
+  userId: integer("user_id").notNull().references(() => newUsers.id, { onDelete: 'cascade' }),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: 'cascade' }),
+  role: text("role").notNull(), // e.g., 'project_admin', 'analyst', 'viewer'
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.projectId] }),
+}));
+
+// === EXISTING SCHEMAS (Keep as-is) ===
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
@@ -259,7 +299,12 @@ export const insertRcFeatureSchema = createInsertSchema(rcFeatures).pick({
   provider: true,
 });
 
-// Types
+// === NEW SCHEMAS FOR PART 1 ===
+export const insertOrganizationSchema = createInsertSchema(organizations);
+export const insertProjectSchema = createInsertSchema(projects);
+export const insertNewUserSchema = createInsertSchema(newUsers);
+
+// === EXISTING TYPES (Keep as-is) ===
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 
@@ -284,7 +329,15 @@ export type InsertSnapshotMetric = z.infer<typeof insertSnapshotMetricSchema>;
 export type SnapshotInsight = typeof snapshotInsights.$inferSelect;
 export type InsertSnapshotInsight = z.infer<typeof insertSnapshotInsightSchema>;
 
-// Analytics Pillar Types
+// === NEW TYPES FOR PART 1 ===
+export type Organization = typeof organizations.$inferSelect;
+export type InsertOrganization = z.infer<typeof insertOrganizationSchema>;
+export type Project = typeof projects.$inferSelect;
+export type InsertProject = z.infer<typeof insertProjectSchema>;
+export type NewUser = typeof newUsers.$inferSelect;
+export type InsertNewUser = z.infer<typeof insertNewUserSchema>;
+
+// === EXISTING PILLAR TYPES (Keep as-is) ===
 export type AnalyticsPillar = 'engagement' | 'retention' | 'monetization' | 'store' | 'ua' | 'techHealth' | 'social';
 
 export interface PillarWeights {

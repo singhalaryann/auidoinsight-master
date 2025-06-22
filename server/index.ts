@@ -1,166 +1,171 @@
+import express from "express";
+import cors from "cors";
 import "dotenv/config";
-import express, { type Request, Response, NextFunction } from "express";
-import { registerRoutes } from "./routes";
+import { db } from "./db";
+import { newUsers, organizations, usersToOrganizations, projects } from "../shared/schema";
+import { oso } from "./oso";
+import { eq } from "drizzle-orm";
 import { setupVite, serveStatic, log } from "./vite";
-import { handleAnalyseCommand, handleInteractiveAction } from "./slack-interactive";
-
-// Global error handlers
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-  // Don't exit the process, just log the error
-});
-
-process.on('uncaughtException', (error) => {
-  console.error('Uncaught Exception:', error);
-  // Don't exit the process, just log the error
-});
+import { createServer } from "http";
 
 const app = express();
+app.use(cors());
 app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
 
-// Register Slack endpoints FIRST to prevent Vite catch-all from intercepting
-app.post('/slack/commands', async (req, res) => {
-  const body = req.body;
-  console.log('Received Slack command:', body.command, 'from user:', body.user_id);
-
-  if (body.command === 'ok /analyse') {
-    try {
-      const modalPromise = handleAnalyseCommand(body);
-      const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('timeout')), 1500);
-      });
-      
-      await Promise.race([modalPromise, timeoutPromise]);
-      res.status(200).json({ text: '' });
-      
-    } catch (error) {
-      console.error('Modal failed, sending fallback:', error);
-      res.status(200).json({
-        response_type: 'ephemeral',
-        blocks: [
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '*Analytics Assistant*\n\nAsk me any analytics question:'
-            }
-          },
-          {
-            type: 'section',
-            text: {
-              type: 'mrkdwn',
-              text: '*Quick Questions:*\n• What are our conversion rates?\n• How is user engagement trending?\n• What drives revenue growth?\n• Which cohorts show best retention?'
-            }
-          },
-          {
-            type: 'context',
-            elements: [
-              {
-                type: 'mrkdwn',
-                text: 'Just mention @Analytics Assistant with your question'
-              }
-            ]
-          }
-        ]
-      });
-    }
-  } else {
-    res.status(200).json({
-      response_type: 'ephemeral',
-      text: 'Command not recognized. Use /analyse to ask analytics questions.'
-    });
+// API Routes for Part 1
+app.post("/api/signup", async (req, res) => {
+  const { email, orgName } = req.body;
+  
+  if (!email || !orgName) {
+    return res.status(400).send({ message: "Email and organization name are required" });
   }
-});
 
-app.post('/slack/interactions', async (req, res) => {
   try {
-    const payload = JSON.parse(req.body.payload);
-    console.log('Received Slack interaction:', payload.type, 'from user:', payload.user?.id);
-    
-    await handleInteractiveAction(payload);
-    res.status(200).json({ text: '' });
+    const existingUser = await db.query.newUsers.findFirst({ where: eq(newUsers.email, email) });
+    if (existingUser) {
+      return res.status(409).send({ message: "User with this email already exists" });
+    }
+
+    const { createdUser, createdOrg } = await db.transaction(async (tx) => {
+      const [user] = await tx.insert(newUsers).values({ email, name: email }).returning();
+      const [org] = await tx.insert(organizations).values({ name: orgName }).returning();
+      await tx.insert(usersToOrganizations).values({
+        userId: user.id,
+        orgId: org.id,
+        role: "org_owner",
+      });
+      return { createdUser: user, createdOrg: org };
+    });
+
+    // Tell Oso about the new user role
+    // await oso.tell("has_role", 
+    //   { type: "NewUser", id: createdUser.id.toString() },
+    //   "org_owner",
+    //   { type: "Organization", id: createdOrg.id.toString() }
+    // );
+
+
+    log(`Success: User ${createdUser.email} created for org ${orgName}. Oso Cloud told.`);
+    res.status(201).send({ userId: createdUser.id, orgId: createdOrg.id });
   } catch (error) {
-    console.error('Interaction error:', error);
-    res.status(200).json({ text: '' });
+    console.error("Signup failed:", error);
+    res.status(500).send({ message: "Internal server error" });
   }
 });
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+app.post("/api/login", async (req, res) => {
+  const { email } = req.body;
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+  if (!email) {
+    return res.status(400).send({ message: "Email is required" });
+  }
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      if (logLine.length > 80) {
-        logLine = logLine.slice(0, 79) + "…";
-      }
-
-      log(logLine);
+  try {
+    // 1. Find the user by email
+    const user = await db.query.newUsers.findFirst({ where: eq(newUsers.email, email) });
+    if (!user) {
+      return res.status(404).send({ message: "User not found" });
     }
-  });
 
-  next();
+    // 2. Find their organization link
+    const userOrgLink = await db.query.usersToOrganizations.findFirst({
+      where: eq(usersToOrganizations.userId, user.id),
+    });
+
+    if (!userOrgLink) {
+      return res.status(404).send({ message: "Organization link not found for this user" });
+    }
+
+    // 3. Find the organization itself
+    const organization = await db.query.organizations.findFirst({
+      where: eq(organizations.id, userOrgLink.orgId),
+    });
+
+    if (!organization) {
+      return res.status(404).send({ message: "Organization not found" });
+    }
+
+    console.log(`Success: User ${email} logged in.`);
+    res.status(200).send({ 
+      userId: user.id, 
+      orgId: organization.id,
+      orgName: organization.name,
+      email: user.email,
+    });
+
+  } catch (error) {
+    console.error("Login failed:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
 });
 
-(async () => {
-  const server = await registerRoutes(app);
+app.get("/api/projects/:orgId", async (req, res) => {
+  const { orgId } = req.params;
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+  try {
+    const projectList = await db.query.projects.findMany({
+      where: eq(projects.orgId, Number(orgId)),
+    });
 
-    res.status(status).json({ message });
-    throw err;
-  });
+    res.status(200).send(projectList);
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
+  } catch (error) {
+    console.error("Failed to fetch projects:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+app.post("/api/projects", async (req, res) => {
+  const { userId, orgId, projectName } = req.body;
+  
+  if (!userId || !orgId || !projectName) {
+    return res.status(400).send({ message: "User ID, Org ID, and Project Name are required." });
+  }
+
+  try {
+    // Check authorization with Oso
+    await oso.authorize(
+      { type: "NewUser", id: userId.toString() },
+      "project:create",
+      { type: "Organization", id: orgId.toString() }
+    );
+
+    log(`ALLOWED: User ${userId} can 'project:create' on Org ${orgId}.`);
+    const [newProject] = await db.insert(projects).values({
+      name: projectName,
+      orgId: orgId,
+    }).returning();
+
+    res.status(201).send(newProject);
+  } catch (error) {
+    console.error("Project creation failed:", error);
+    res.status(403).send({ message: "Forbidden: You do not have permission to create projects." });
+  }
+});
+
+const PORT = process.env.PORT || 9000;
+const server = createServer(app);
+
+server.listen(PORT, async () => {
+  log(`Server listening on port ${PORT}`);
+  log("Oso Cloud authorization is ready!");
+
+
+
+
+
+
+
+
+
+
+  if (process.env.NODE_ENV === "development") {
     await setupVite(app, server);
+    log("Vite dev server setup complete - serving React frontend");
   } else {
     serveStatic(app);
+    log("Serving static frontend files");
   }
+});
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 3000;
-  
-  const startServer = () => {
-    server.listen({
-      port,
-      host: "0.0.0.0",
-    }, () => {
-      log(`serving on port ${port}`);
-    });
-  };
-
-  server.on('error', (err: any) => {
-    if (err.code === 'EADDRINUSE') {
-      log(`Port ${port} is busy, waiting for it to be available...`);
-      setTimeout(() => {
-        startServer();
-      }, 3000);
-    } else {
-      console.error('Server error:', err);
-      process.exit(1);
-    }
-  });
-  
-  startServer();
-})();
+//
