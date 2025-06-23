@@ -1,4 +1,4 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb, doublePrecision, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, doublePrecision, primaryKey, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -168,7 +168,7 @@ export const snapshotInsights = pgTable("snapshot_insights", {
 // === NEW TABLES FOR PART 1 (Organizations, Projects, Users with Permissions) ===
 export const organizations = pgTable("organizations", {
   id: serial("id").primaryKey(),
-  name: text("name").notNull(),
+  name: text("name").notNull().unique(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -177,7 +177,9 @@ export const projects = pgTable("projects", {
   name: text("name").notNull(),
   orgId: integer("org_id").notNull().references(() => organizations.id, { onDelete: 'cascade' }),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (t) => ({
+  uniqueProjectNamePerOrg: unique().on(t.orgId, t.name),
+}));
 
 export const newUsers = pgTable("new_users", {
   id: serial("id").primaryKey(),
@@ -199,7 +201,7 @@ export const usersToProjects = pgTable("users_to_projects", {
   projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: 'cascade' }),
   role: text("role").notNull(), // e.g., 'project_admin', 'analyst', 'viewer'
 }, (t) => ({
-  pk: primaryKey({ columns: [t.userId, t.projectId] }),
+  pk: primaryKey({ columns: [t.userId, t.projectId, t.role] }),
 }));
 
 // === EXISTING SCHEMAS (Keep as-is) ===

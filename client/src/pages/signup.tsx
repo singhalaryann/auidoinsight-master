@@ -100,7 +100,13 @@ export function SignupPage() {
       const res = await fetch("http://localhost:9000/api/projects", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: session.userId, orgId: session.orgId, projectName }),
+        body: JSON.stringify({ 
+          userId: session.userId, 
+          orgId: session.orgId, 
+          orgName: session.orgName, 
+          projectName, 
+          email: session.email 
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Project creation failed");
@@ -120,7 +126,7 @@ export function SignupPage() {
       const res = await fetch(`http://localhost:9000/api/projects/${projectId}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: session.userId }),
+        body: JSON.stringify({ userId: session.userId, email: session.email }),
       });
 
       if (!res.ok) {
@@ -154,7 +160,12 @@ export function SignupPage() {
       const res = await fetch(`http://localhost:9000/api/projects/${editingProjectId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: session.userId, name: editingProjectName }),
+        body: JSON.stringify({ 
+          userId: session.userId, 
+          name: editingProjectName, 
+          orgName: session.orgName, 
+          email: session.email 
+        }),
       });
 
       const updatedProject = await res.json();

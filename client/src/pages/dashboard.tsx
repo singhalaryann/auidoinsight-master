@@ -13,15 +13,33 @@ import { Badge } from "@/components/ui/badge";
 import { BarChart3, Mic, MessageSquare } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { User, PillarWeights, AnalyticsPillar, IntentClassification, DashboardConfig } from "@shared/schema";
+import ProjectRoleManager from "../components/ProjectRoleManager";
+
+// Add a fallback type for the session user
+interface SessionUser {
+  userId: number;
+  orgId: number;
+  orgName: string;
+  email: string;
+  role: string;
+}
 
 export default function Dashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const [showRoleManager, setShowRoleManager] = useState<{ open: boolean, projectId?: number }>({ open: false });
+  const [selectedProject, setSelectedProject] = useState<any>(null);
 
-  // Fetch user data
-  const { data: user } = useQuery<User>({
-    queryKey: ['/api/user']
+  // Fetch user data (from session)
+  const { data: user, refetch: refetchUser } = useQuery<SessionUser>({
+    queryKey: ['/api/user'],
+    queryFn: async () => {
+      const res = await apiRequest('GET', '/api/user');
+      if (!res.ok) return null;
+      return res.json();
+    },
+    retry: false
   });
 
   // Fetch dashboard configuration
@@ -35,8 +53,61 @@ export default function Dashboard() {
     refetchInterval: 30000 // Refresh every 30 seconds
   });
 
+  // Fetch projects the user can access
+  const { data: projects = [], refetch: refetchProjects } = useQuery<any[]>({
+    queryKey: ['/api/my-projects', user?.email],
+    queryFn: async () => {
+      if (!user?.email) return [];
+      const res = await apiRequest('GET', `/api/my-projects?email=${encodeURIComponent(user.email)}`);
+      return res.json();
+    },
+    enabled: !!user?.email,
+  });
+
   // WebSocket for real-time updates
   const { lastMessage, connectionStatus } = useWebSocket('/ws');
+
+  // On mount, if no token, redirect to login (or show login UI)
+  useEffect(() => {
+    if (!localStorage.getItem('session_token')) {
+      // For demo, just alert and reload
+      alert('Please log in or sign up.');
+      window.location.reload();
+    }
+  }, []);
+
+  // Project creation mutation
+  const createProjectMutation = useMutation({
+    mutationFn: async (projectName: string) => {
+      if (!user) throw new Error('Not logged in');
+      // Generate a temporary projectId if needed (or leave undefined)
+      const projectId = undefined; // Set this if you have a way to generate it on the client, else backend will assign
+      console.log('Creating project with:', {
+        userId: user.userId,
+        orgId: user.orgId,
+        orgName: user.orgName,
+        projectId,
+        projectName,
+        email: user.email
+      });
+      const res = await apiRequest('POST', '/api/projects', {
+        userId: user.userId,
+        orgId: user.orgId,
+        orgName: user.orgName,
+        projectId,
+        projectName,
+        email: user.email
+      });
+      if (!res.ok) throw new Error((await res.json()).message);
+      return res.json();
+    },
+    onSuccess: () => {
+      refetchProjects();
+    },
+    onError: (error: any) => {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
+    }
+  });
 
   // Handle WebSocket messages
   useEffect(() => {
@@ -184,10 +255,10 @@ export default function Dashboard() {
             <div className="flex items-center space-x-2 md:space-x-4">
               {user && (
                 <div className="flex items-center space-x-2">
-                  <span className="text-sm text-muted-foreground hidden md:block">{user.name}</span>
+                  <span className="text-sm text-muted-foreground hidden md:block">{user.email.split('@')[0]}</span>
                   <Avatar className="h-7 w-7 md:h-8 md:w-8">
                     <AvatarFallback className="bg-primary text-primary-foreground text-xs">
-                      {user.name.split(' ').map(n => n[0]).join('')}
+                      {user.email.split('@')[0].split(/\W+/).map((n: string) => n[0]).join('')}
                     </AvatarFallback>
                   </Avatar>
                 </div>
@@ -210,7 +281,29 @@ export default function Dashboard() {
           />
         </div>
 
-
+        {/* Projects List */}
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold mb-2">Your Projects</h2>
+          <div className="space-y-2">
+            {projects.map((project: any) => {
+              // More robust check for org owner role
+              const isOrgOwner = typeof user?.role === 'string' && user.role.toLowerCase().includes('owner');
+              return (
+                <div key={project.id} className="flex items-center justify-between bg-card rounded px-4 py-2 shadow-sm border">
+                  <div>
+                    <span className="font-medium text-foreground">{project.name}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">(ID: {project.id})</span>
+                  </div>
+                  {isOrgOwner && (
+                    <Button size="sm" variant="outline" onClick={() => { setSelectedProject(project); setShowRoleManager({ open: true, projectId: project.id }); }}>
+                      Manage Roles
+                    </Button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
 
         {/* Dashboard Content */}
         <div className="space-y-4 md:space-y-6">
@@ -223,8 +316,16 @@ export default function Dashboard() {
             />
           )}
 
-
         </div>
+
+        {/* ProjectRoleManager Modal */}
+        {showRoleManager.open && selectedProject && (
+          <ProjectRoleManager
+            open={showRoleManager.open}
+            onClose={() => { setShowRoleManager({ open: false }); setSelectedProject(null); refetchProjects(); }}
+            project={selectedProject}
+          />
+        )}
       </div>
     </div>
   );
